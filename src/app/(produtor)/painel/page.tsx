@@ -154,6 +154,7 @@ export default async function Painel() {
                     <th className="px-4 py-3 font-semibold">Situação</th>
                     <th className="px-4 py-3 text-right font-semibold">Vendidos</th>
                     <th className="px-4 py-3 text-right font-semibold">Bruto</th>
+                    <th className="px-4 py-3 font-semibold"><span className="sr-only">Portaria</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -191,6 +192,14 @@ export default async function Painel() {
                         </td>
                         <td className="tabular px-4 py-3 text-right font-medium">
                           {formatarBRL(e.brutoCentavos)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Link
+                            href={`/portaria/${e.id}`}
+                            className="whitespace-nowrap rounded-botao border border-line-forte px-3 py-1.5 text-xs font-medium transition hover:border-accent hover:text-accent"
+                          >
+                            Portaria
+                          </Link>
                         </td>
                       </tr>
                     );

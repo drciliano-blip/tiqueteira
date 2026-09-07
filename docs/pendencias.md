@@ -61,6 +61,72 @@ o piloto.
 
 ---
 
+## Decisões comerciais a alinhar (levantadas em 2026-09-07)
+
+### Domínio próprio
+Comprar `.com.br` no Registro.br ou `.com` na Cloudflare (preço de custo, sem
+markup na renovação).
+
+**Recomendação:** usar subdomínio para ingressos — `ingressos.dominio.com.br` —
+e não a raiz. O e-mail transacional precisa de reputação própria, e problema de
+entrega de ingresso não pode contaminar o domínio institucional do grupo.
+
+A ligação com a Vercel é um CNAME.
+
+### Parcelamento com juros — quem paga
+Três formatos possíveis, e o campo `tenants.juros_parcelamento_absorvidos` já
+permite regra diferente por produtor:
+
+| Modelo | Quem paga | Efeito |
+|---|---|---|
+| Sem juros, produtor absorve | Produtor recebe menos | Ticket médio sobe, margem cai |
+| Com juros, comprador paga | Comprador vê parcela maior | Margem preservada, conversão cai |
+| Sem juros até N parcelas | Misto | O mais usado no mercado |
+
+**Falta:** a tabela de juros por número de parcelas da PSP escolhida. Sem ela
+não há como calcular, e cada PSP tem a sua.
+
+### Adiantamento de repasse
+É **operação de crédito**, não de bilheteria: adiantar R$ 50 mil e o evento ser
+cancelado transforma a plataforma em credora de quem acabou de perder dinheiro.
+
+Referência de mercado (Sympla): percentual escalonado 20/40/60/80% das vendas,
+valor mínimo, taxa fixa e análise de risco caso a caso.
+
+**Decisão de arquitetura:** modelar a condição comercial por produtor agora —
+conveniência, comissão, reserva, prazo de liberação e limite de adiantamento —
+para que negociar com um cliente novo seja preencher formulário, não mexer em
+código.
+
+**A conversar com a PSP:** várias oferecem antecipação com recurso próprio
+delas. A plataforma fica com parte da taxa sem assumir risco de crédito nem
+imobilizar capital.
+
+### Carga simultânea na abertura de vendas
+Estado atual do banco (plano gratuito): **15 conexões** ao Postgres e teto de
+**200 clientes** no pooler. Serve para venda normal; **não serve** para abertura
+com milhares de pessoas ao mesmo tempo — e o sintoma seria erro de conexão na
+hora exata em que todos tentam comprar.
+
+Soluções, em ordem de custo:
+
+1. **Subir o tamanho do banco no dia da abertura.** Minutos para aplicar,
+   dezenas de dólares no mês.
+2. **Cache da página do evento.** Quem só olha não precisa tocar no banco;
+   só quem clica em comprar precisa. Derruba a carga em mais de 90%.
+3. **Fila virtual** (Fase 4). Em vez de 2.000 pessoas travarem o sistema, 200
+   compram e as demais veem a posição na fila.
+
+O **check-in não preocupa**: a portaria baixa o manifesto assinado antes de
+abrir os portões e valida no próprio aparelho. Mil pessoas entrando não geram
+mil consultas ao banco.
+
+**Ação:** incluir teste de carga na Fase 1.5, junto com o evento fantasma —
+500 compras simultâneas contra o ambiente de teste, para decidir o tamanho do
+banco com número e não com opinião.
+
+---
+
 ## Bloqueiam go-live (não bloqueiam código)
 
 ### 5. Cinco decisões de negócio (plano, seção 1)

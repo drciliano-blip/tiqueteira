@@ -176,6 +176,7 @@ async function seed() {
     { userId: admin.id, tenantId: heyHey.id, role: 'admin' },
     { userId: produtorA.id, tenantId: superFestas.id, role: 'owner' },
     { userId: produtorB.id, tenantId: heyHey.id, role: 'owner' },
+    { userId: portaria.id, tenantId: superFestas.id, role: 'portaria' },
   ]);
 
   // -------------------------------------------------------------------------
