@@ -400,7 +400,18 @@ async function seed() {
       const valorProdutor = total - valorOperador;
 
       const metodo = rnd() < 0.75 ? ('pix' as const) : ('credit_card' as const);
-      const pago = ['paid', 'partially_refunded', 'refunded', 'chargeback'].includes(status);
+
+      // Cortesia e PCD custam zero. Não existe reembolso nem chargeback de
+      // zero — e o CHECK `refunds_valor_ck` recusa, corretamente. Esse pedido
+      // vira apenas `paid`.
+      const statusEfetivo =
+        total === 0 && ['refunded', 'partially_refunded', 'chargeback'].includes(status)
+          ? ('paid' as const)
+          : status;
+
+      const pago = ['paid', 'partially_refunded', 'refunded', 'chargeback'].includes(
+        statusEfetivo,
+      );
 
       const [pedido] = await db
         .insert(schema.orders)
@@ -423,12 +434,12 @@ async function seed() {
           taxaFixaCentavosSnapshot: tenant.taxaFixaCentavos,
           metodo,
           parcelas: metodo === 'credit_card' ? inteiro(1, 6) : null,
-          status,
+          status: statusEfetivo,
           providerTransactionId: pago ? `fake_tx_${criados}` : null,
           idempotencyKey: `seed_${criados}`,
-          expiresEm: status === 'awaiting_payment' ? dias(0.007) : dias(-1),
+          expiresEm: statusEfetivo === 'awaiting_payment' ? dias(0.007) : dias(-1),
           pagoEm: pago ? dias(-inteiro(1, 25)) : null,
-          canceladoEm: status === 'canceled' ? dias(-inteiro(1, 10)) : null,
+          canceladoEm: statusEfetivo === 'canceled' ? dias(-inteiro(1, 10)) : null,
         })
         .returning();
 
@@ -443,7 +454,7 @@ async function seed() {
       });
 
       // Reserva viva só para pedido aguardando pagamento.
-      if (status === 'awaiting_payment') {
+      if (statusEfetivo === 'awaiting_payment') {
         await db.insert(schema.reservations).values({
           tenantId: tenant.id,
           ticketTypeId: tipo.id,
@@ -451,7 +462,7 @@ async function seed() {
           quantidade,
           expiresEm: dias(0.007),
         });
-      } else if (status === 'expired') {
+      } else if (statusEfetivo === 'expired') {
         await db.insert(schema.reservations).values({
           tenantId: tenant.id,
           ticketTypeId: tipo.id,
@@ -466,7 +477,7 @@ async function seed() {
 
       // Ingressos para pedido pago.
       if (pago) {
-        const cancelados = status === 'refunded' || status === 'chargeback';
+        const cancelados = statusEfetivo === 'refunded' || statusEfetivo === 'chargeback';
         for (let t = 0; t < quantidade; t++) {
           const usado = evento.status === 'encerrado' && !cancelados && rnd() < 0.85;
           await db.insert(schema.tickets).values({
@@ -484,13 +495,13 @@ async function seed() {
             checkedInBy: usado ? portaria.id : null,
             documentoConferido: usado,
             canceladoEm: cancelados ? dias(-inteiro(1, 5)) : null,
-            canceladoMotivo: cancelados ? status : null,
+            canceladoMotivo: cancelados ? statusEfetivo : null,
           });
         }
       }
 
       // Reembolsos e chargebacks.
-      if (status === 'refunded') {
+      if (statusEfetivo === 'refunded') {
         await db.insert(schema.refunds).values({
           tenantId: tenant.id,
           orderId: pedido.id,
@@ -501,18 +512,18 @@ async function seed() {
           idempotencyKey: `seed_rf_${criados}`,
           concluidoEm: dias(-inteiro(1, 5)),
         });
-      } else if (status === 'partially_refunded') {
+      } else if (statusEfetivo === 'partially_refunded') {
         await db.insert(schema.refunds).values({
           tenantId: tenant.id,
           orderId: pedido.id,
           motivo: 'buyer_request',
-          valorCentavos: Math.round(total / 2),
+          valorCentavos: Math.max(1, Math.round(total / 2)),
           status: 'succeeded',
           providerRefundId: `fake_rf_${criados}`,
           idempotencyKey: `seed_rf_${criados}`,
           concluidoEm: dias(-inteiro(1, 5)),
         });
-      } else if (status === 'chargeback') {
+      } else if (statusEfetivo === 'chargeback') {
         await db.insert(schema.chargebacks).values({
           tenantId: tenant.id,
           orderId: pedido.id,
@@ -584,8 +595,12 @@ async function seed() {
   console.log('  Produtor B: bruno@heyhey.com.br');
 }
 
-try {
-  await seed();
-} finally {
-  await sql.end();
+async function main() {
+  try {
+    await seed();
+  } finally {
+    await sql.end();
+  }
 }
+
+void main();

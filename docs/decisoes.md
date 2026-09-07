@@ -207,3 +207,57 @@ teste verde.
 (`DATABASE_URL`, `DIRECT_URL`, `SERVICE_DATABASE_URL`). Em troca, o teste de
 isolamento da Fase 0 prova alguma coisa, e um `serviceDb()` usado por engano
 numa rota de usuário vira revisão de código, não vazamento silencioso.
+
+---
+
+## ADR-008 — Conexão ao Supabase pelo pooler, não pela conexão direta
+
+**Data:** 2026-09-07
+**Status:** aceita
+
+**Contexto.** Projetos novos do Supabase expõem a conexão direta
+(`db.<ref>.supabase.co:5432`) **apenas por IPv6**. O add-on de IPv4 é pago. A
+maior parte das redes brasileiras, domésticas e corporativas, é IPv4 — então
+migrations e seed falhariam com erro de resolução de nome, que é confuso de
+diagnosticar porque parece problema de credencial.
+
+**Decisão.** Nenhuma conexão usa o host direto:
+
+| Variável | Host | Porta | Papel | Uso |
+|---|---|---|---|---|
+| `DIRECT_URL` | pooler | 5432 (session) | `postgres` | migrations, seed, rls |
+| `DATABASE_URL` | pooler | 6543 (transaction) | `tiqueteira_app` | aplicação |
+| `SERVICE_DATABASE_URL` | pooler | 6543 (transaction) | `tiqueteira_service` | jobs, webhooks |
+
+O nome `DIRECT_URL` é mantido por convenção do Drizzle: significa "sem pooling
+em modo transação", não "sem pooler".
+
+O modo transação (6543) exige `prepare: false` no cliente `postgres.js` —
+prepared statements não sobrevivem à troca de conexão do pooler. Isso já está
+em `src/db/client.ts`.
+
+**Verificado em 2026-09-07:** o Supavisor aceita papel customizado no formato
+`<papel>.<project_ref>` como usuário. Os dois papéis conectam e o
+`tiqueteira_app` é submetido ao RLS — comprovado pelo teste que lê
+`pg_roles.rolbypassrls`.
+
+**Consequência.** Funciona em rede IPv4 sem custo adicional. Em contrapartida,
+toda conexão passa pelo Supavisor, então indisponibilidade dele é
+indisponibilidade do sistema — item para o runbook.
+
+---
+
+## ADR-009 — Região do projeto Supabase (em aberto)
+
+**Data:** 2026-09-07
+**Status:** pendente
+
+**Contexto.** O projeto `yccaeuqepknwnqnvyslx` foi criado em **us-east-1**
+(Norte da Virgínia). O público comprador está no Brasil. Cada ida e volta ao
+banco custa ~120 ms a mais do que custaria em `sa-east-1` (São Paulo), e o
+checkout faz várias em sequência.
+
+**Opções.** Manter; ou recriar o projeto em `sa-east-1` — indolor enquanto não
+há dado de produção, já que as migrations e o `rls.sql` reproduzem tudo.
+
+**Decisão.** A tomar antes do primeiro evento real.
