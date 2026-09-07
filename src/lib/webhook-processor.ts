@@ -24,6 +24,7 @@ import { serviceDb, type Database } from '@/db/client';
 import { events, orderItems, orders, tickets, webhookEvents } from '@/db/schema';
 import { aplicarEvento, type OrderStatus } from '@/domain/order';
 import { confirmarEstoque, devolverEstoque } from '@/lib/inventory';
+import { enfileirar } from '@/lib/jobs';
 import { emitirTicket } from '@/lib/tickets';
 import type { NormalizedWebhookEvent, PaymentProvider } from '@/lib/payments/types';
 
@@ -203,6 +204,19 @@ async function processarEvento(
       }
 
       const emitidos = await emitirIngressos(tx, pedido, ticketSecret);
+
+      /**
+       * O envio entra na MESMA transação que confirmou o pagamento. Ou os dois
+       * acontecem, ou nenhum — não existe pedido pago sem e-mail enfileirado.
+       * A chave de deduplicação garante que reentrega não enfileire de novo.
+       */
+      await enfileirar(tx, {
+        nome: 'enviar-ingressos',
+        tenantId: pedido.tenantId,
+        payload: { orderId: pedido.id },
+        dedupeKey: `enviar-ingressos:${pedido.id}`,
+      });
+
       return `pedido ${pedido.id} pago, ${emitidos} ingressos emitidos`;
     }
 

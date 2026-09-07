@@ -73,6 +73,43 @@ entrega de ingresso não pode contaminar o domínio institucional do grupo.
 
 A ligação com a Vercel é um CNAME.
 
+### CNPJ operador e CNAE
+**Decisão tomada em 2026-09-07:** reaproveitar um CNPJ existente do grupo
+(espaço de eventos) e adicionar os CNAEs da atividade de bilheteria. Empresa
+com histórico passa mais rápido no KYC da PSP do que empresa recém-aberta.
+
+**CNAEs candidatos** (validar com o contador):
+
+| CNAE | Descrição |
+|---|---|
+| 6319-4/00 | Portais, provedores de conteúdo e outros serviços de informação na internet |
+| 7990-2/00 | Serviços de reservas e outros serviços de turismo não especificados |
+| 8230-0/01 | Organização de feiras, congressos, exposições e festas |
+| 6209-1/00 ou 6311-9/00 | Serviços de TI / tratamento de dados |
+| 7319-0/02 | Promoção de vendas |
+
+**Não incluir** CNAE que sugira atividade financeira ou de pagamento: alimenta
+exatamente a discussão de instituição de pagamento que a arquitetura evita.
+
+**Mais importante que o CNAE:** o código de serviço da NFS-e, que define o ISS.
+Para intermediação, LC 116/2003 itens 10.05 (agenciamento, corretagem ou
+intermediação) e 10.09 (representação). Alíquota de 2% a 5%, conforme o
+município.
+
+A nota é sobre a **comissão e a conveniência**, nunca sobre o valor do
+ingresso — é o que separa tributar R$ 10 mil de tributar R$ 100 mil.
+
+**Três perguntas para o contador:**
+1. Adicionando esses CNAEs, a empresa muda de anexo no Simples (III ou V)?
+2. O faturamento da plataforma aproxima a empresa do teto de R$ 4,8 milhões?
+3. Como fica a responsabilidade da empresa quando um produtor terceiro
+   cancelar um evento? O consumidor reclama de quem emitiu a nota.
+
+**Prazo:** ajustar o CNAE **antes** de abrir cadastro na PSP. Se o cadastro
+disser apenas "espaço de eventos" e a operação for bilheteria com split para
+terceiros, a operadora pode classificar como risco alto ou recusar — e
+refazer custa semanas.
+
 ### Parcelamento com juros — quem paga
 Três formatos possíveis, e o campo `tenants.juros_parcelamento_absorvidos` já
 permite regra diferente por produtor:
