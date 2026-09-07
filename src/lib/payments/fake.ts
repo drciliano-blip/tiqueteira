@@ -61,6 +61,7 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
   readonly capabilities = CAPABILITIES;
 
   private readonly segredo: string;
+  private readonly namespace: string;
   private recebedores = new Map<string, Recipient>();
   private transacoes = new Map<string, TransacaoInterna>();
   private saldos = new Map<string, SaldoInterno>();
@@ -71,8 +72,14 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
   private latenciaMs = 0;
   private sequencia = 0;
 
-  constructor(segredoWebhook = 'fake-webhook-secret') {
+  /**
+   * `namespace` separa os identificadores de instâncias diferentes. Sem ele,
+   * dois testes que criam a própria PSP geram `fake_tx_000001` os dois, e
+   * colidem na unique de `orders.provider_transaction_id`.
+   */
+  constructor(segredoWebhook = 'fake-webhook-secret', namespace = '') {
     this.segredo = segredoWebhook;
+    this.namespace = namespace ? `${namespace}_` : '';
   }
 
   // -------------------------------------------------------------------------
@@ -82,7 +89,7 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
   /** Ids sequenciais: teste que compara saída não pode depender de sorteio. */
   private id(prefixo: string): string {
     this.sequencia += 1;
-    return `fake_${prefixo}_${String(this.sequencia).padStart(6, '0')}`;
+    return `fake_${this.namespace}${prefixo}_${String(this.sequencia).padStart(6, '0')}`;
   }
 
   private async antes(metodo: string): Promise<void> {
@@ -199,6 +206,26 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
     }
     for (const s of input.splits) {
       if (!this.recebedores.has(s.providerRecipientId)) {
+        /**
+         * Este provider guarda estado em memória, e em ambiente serverless
+         * cada requisição pode ser um processo novo — o recebedor criado no
+         * onboarding não sobrevive até o checkout.
+         *
+         * Identificador com o prefixo `fake_rcpt_` é reconhecido como
+         * recebedor conhecido e registrado na hora. Vale SÓ para o provider
+         * falso: a PSP real não inventa recebedor, e o adaptador dela deve
+         * manter a recusa.
+         */
+        if (s.providerRecipientId.startsWith('fake_rcpt_')) {
+          this.recebedores.set(s.providerRecipientId, {
+            providerRecipientId: s.providerRecipientId,
+            status: 'active',
+            raw: { reconstruido: true },
+          });
+          this.saldo(s.providerRecipientId);
+          continue;
+        }
+
         throw new PaymentProviderError(
           `Recebedor ${s.providerRecipientId} não existe`,
           'not_found',

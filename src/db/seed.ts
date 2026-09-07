@@ -103,6 +103,7 @@ async function seed() {
         email: 'financeiro@heyhey.com.br',
         telefone: '11912345678',
         kycStatus: 'em_analise', // ainda não pode receber repasse
+        providerRecipientId: 'fake_rcpt_heyhey',
         corAcento: '#22D3A6',
         taxaMinimaCentavos: 399,
         taxaConvenienciaBps: 1200,

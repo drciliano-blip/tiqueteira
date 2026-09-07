@@ -2,13 +2,16 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { eq, sql } from 'drizzle-orm';
+import QRCode from 'qrcode';
 
 import { ContagemRegressiva } from '@/components/contagem-regressiva';
 import { TemaTenant } from '@/components/tema-tenant';
 import { serviceDb } from '@/db/client';
-import { events, orderItems, orders, tenants, ticketTypes } from '@/db/schema';
+import { events, orderItems, orders, tenants, ticketTypes, tickets } from '@/db/schema';
 import { dataLonga, hora } from '@/lib/datas';
 import { formatarBRL } from '@/lib/money';
+import { FormularioComprador } from './formulario';
+import { PainelPix } from './painel-pix';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,14 +39,13 @@ async function carregarPedido(orderId: string) {
       convenienciaCentavos: orders.convenienciaCentavos,
       totalCentavos: orders.totalCentavos,
       expiresEm: orders.expiresEm,
-      // O relógio que vale é o do banco: o do servidor de renderização pode
-      // estar em outro fuso, ou adiantado.
       vencido: sql<boolean>`${orders.expiresEm} is not null and ${orders.expiresEm} <= now()`,
+      pixQrCode: orders.pixQrCode,
+      compradorEmail: orders.compradorEmail,
       eventoTitulo: events.titulo,
       eventoSlug: events.slug,
       eventoData: events.dataInicio,
       tenantSlug: tenants.slug,
-      tenantNome: tenants.nome,
       corAcento: tenants.corAcento,
     })
     .from(orders)
@@ -64,7 +66,15 @@ async function carregarPedido(orderId: string) {
     .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
     .where(eq(orderItems.orderId, orderId));
 
-  return { ...pedido, itens };
+  const emitidos =
+    pedido.status === 'paid'
+      ? await db
+          .select({ codigo: tickets.codigo, titular: tickets.titularNome })
+          .from(tickets)
+          .where(eq(tickets.orderId, orderId))
+      : [];
+
+  return { ...pedido, itens, emitidos };
 }
 
 export default async function Checkout({ params }: Props) {
@@ -76,8 +86,14 @@ export default async function Checkout({ params }: Props) {
   const pedido = await carregarPedido(orderId);
   if (!pedido) notFound();
 
-  const vencido = pedido.vencido === true;
+  const pago = pedido.status === 'paid';
   const encerrado = ['expired', 'canceled'].includes(pedido.status);
+  const perdido = !pago && (pedido.vencido || encerrado);
+
+  const qrImagem =
+    pedido.status === 'awaiting_payment' && pedido.pixQrCode
+      ? await QRCode.toDataURL(pedido.pixQrCode, { margin: 0, width: 416 })
+      : null;
 
   return (
     <>
@@ -86,20 +102,20 @@ export default async function Checkout({ params }: Props) {
       <div className="flex min-h-dvh flex-col">
         <header className="border-b border-line">
           <div className="mx-auto flex h-14 max-w-lg items-center justify-between px-4">
-            <span className="text-sm text-muted">Pedido nº {pedido.numero}</span>
-            {!vencido && !encerrado && pedido.expiresEm && (
+            <span className="tabular text-sm text-muted">Pedido nº {pedido.numero}</span>
+            {!perdido && !pago && pedido.expiresEm && (
               <ContagemRegressiva ate={pedido.expiresEm.toISOString()} />
             )}
           </div>
         </header>
 
         <main className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
-          {vencido || encerrado ? (
+          {perdido ? (
             <div className="rounded-cartao border border-line bg-raised p-6 text-center">
               <h1 className="font-titulo text-lg font-bold">A reserva expirou</h1>
               <p className="prosa mx-auto mt-2 text-sm text-muted">
-                Os ingressos voltaram para a venda. Se ainda houver lugar, é só escolher de
-                novo — leva menos de um minuto.
+                Os ingressos voltaram para a venda. Se ainda houver lugar, é só escolher de novo
+                — leva menos de um minuto.
               </p>
               <Link
                 href={`/${pedido.tenantSlug}/e/${pedido.eventoSlug}`}
@@ -107,6 +123,36 @@ export default async function Checkout({ params }: Props) {
               >
                 Voltar ao evento
               </Link>
+            </div>
+          ) : pago ? (
+            <div>
+              <div className="rounded-cartao border border-sucesso/40 bg-sucesso/10 p-6 text-center">
+                <h1 className="font-titulo text-lg font-bold text-sucesso">
+                  Pagamento confirmado
+                </h1>
+                <p className="prosa mx-auto mt-2 text-sm text-muted">
+                  {pedido.emitidos.length}{' '}
+                  {pedido.emitidos.length === 1 ? 'ingresso emitido' : 'ingressos emitidos'} e
+                  enviados para {pedido.compradorEmail}.
+                </p>
+              </div>
+
+              <ul className="mt-6 divide-y divide-line overflow-hidden rounded-cartao border border-line bg-raised">
+                {pedido.emitidos.map((t) => (
+                  <li key={t.codigo} className="flex items-center justify-between px-4 py-3">
+                    <span className="text-sm">{t.titular}</span>
+                    <span className="tabular text-sm font-semibold">{t.codigo}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <p className="prosa mt-6 text-sm text-muted">
+                Apagou o e-mail? Os ingressos ficam guardados em{' '}
+                <Link href="/meus-ingressos" className="font-medium text-accent">
+                  Meus ingressos
+                </Link>
+                , com acesso pelo mesmo e-mail da compra.
+              </p>
             </div>
           ) : (
             <>
@@ -150,16 +196,25 @@ export default async function Checkout({ params }: Props) {
                 </dl>
               </section>
 
-              <div className="mt-6 rounded-cartao border border-dashed border-line-forte px-4 py-8 text-center">
-                <p className="text-sm text-muted">
-                  Aqui entram os dados do comprador e o pagamento com Pix.
+              {pedido.status === 'draft' ? (
+                <FormularioComprador orderId={pedido.id} />
+              ) : qrImagem && pedido.pixQrCode ? (
+                <PainelPix
+                  orderId={pedido.id}
+                  qrCode={pedido.pixQrCode}
+                  qrCodeImagem={qrImagem}
+                  simulacaoDisponivel={process.env.APP_ENV !== 'production'}
+                />
+              ) : (
+                <p className="mt-6 rounded-botao border border-alerta/40 bg-alerta/10 px-4 py-3 text-sm text-alerta">
+                  A cobrança está sendo gerada. Atualize a página em instantes.
                 </p>
-                <p className="mt-1 text-xs text-faint">Próxima etapa da construção.</p>
-              </div>
+              )}
 
-              <p className="prosa mt-6 text-xs text-faint">
-                Seus ingressos estão guardados até o fim da contagem. Passado esse tempo, eles
-                voltam para a venda automaticamente.
+              <p className="prosa mt-8 text-xs text-faint">
+                Seus ingressos ficam guardados até o fim da contagem. Passado esse tempo, voltam
+                para a venda automaticamente. Se o Pix for pago depois disso, o valor é devolvido
+                e você é avisado.
               </p>
             </>
           )}

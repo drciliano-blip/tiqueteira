@@ -29,6 +29,13 @@
       "when": 1788821183172,
       "tag": "0003_ancient_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788822085962,
+      "tag": "0004_massive_madrox",
+      "breakpoints": true
     }
   ]
 }

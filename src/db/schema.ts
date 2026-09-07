@@ -601,6 +601,17 @@ export const orders = pgTable(
 
     status: orderStatusEnum('status').notNull().default('draft'),
     providerTransactionId: text('provider_transaction_id'),
+
+    /**
+     * Código "copia e cola" do Pix, como devolvido pela PSP.
+     *
+     * Precisa ser persistido: o comprador atualiza a página, volta pelo
+     * histórico ou abre no computador depois de ler no celular, e a cobrança
+     * tem de continuar a mesma. Recriá-la geraria duas cobranças para um
+     * pedido só.
+     */
+    pixQrCode: text('pix_qr_code'),
+    pixExpiraEm: timestamp('pix_expira_em', { withTimezone: true }),
     idempotencyKey: text('idempotency_key').notNull(),
 
     expiresEm: timestamp('expires_em', { withTimezone: true }),
