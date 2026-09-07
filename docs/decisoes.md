@@ -260,4 +260,20 @@ checkout faz várias em sequência.
 **Opções.** Manter; ou recriar o projeto em `sa-east-1` — indolor enquanto não
 há dado de produção, já que as migrations e o `rls.sql` reproduzem tudo.
 
-**Decisão.** A tomar antes do primeiro evento real.
+**Decisão (2026-09-07).** Manter `us-east-1` para **desenvolvimento** e criar o
+projeto de **produção** já em `sa-east-1`, no momento em que ele for criado —
+antes do evento piloto.
+
+**Razão.** A tentativa de migrar agora produziu dois projetos e nenhuma
+melhora: a região é escolhida na criação, e o projeto novo saiu na mesma
+região por engano. O ganho é de ~120 ms por ida e volta, real mas não
+bloqueante em desenvolvimento; o custo de manter dois projetos em paralelo é
+confusão sobre qual está em uso — que é o tipo de erro que faz alguém rodar
+migration no banco errado.
+
+Produção nasce em São Paulo, com plano pago e sem dado a migrar. O risco
+some junto com a pressa.
+
+**Consequência.** `docs/pendencias.md` deixa de listar a mudança de região
+como tarefa imediata e passa a listá-la como requisito da criação do ambiente
+de produção.

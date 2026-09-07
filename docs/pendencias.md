@@ -10,18 +10,13 @@ Nada nesta lista bloqueia o desenvolvimento hoje. O que está marcado como
 
 ## Agora (custa pouco hoje, caro depois)
 
-### 1. Região do banco — 10 minutos
-**Por quê:** o projeto Supabase está em Norte da Virgínia. Cada consulta do
-checkout carrega ~120 ms a mais do que carregaria em São Paulo, e o checkout
-faz várias em sequência. Enquanto não há dado real, recriar é indolor.
+### 1. ~~Região do banco~~ — resolvido de outro jeito
+**Decidido em 2026-09-07 (ADR-009):** o banco de desenvolvimento fica onde
+está. O projeto de **produção** é que nasce em `sa-east-1` (São Paulo), quando
+for criado, antes do evento piloto. Migrar agora traria dois projetos em
+paralelo e nenhum ganho real.
 
-**Como:**
-1. Dashboard do Supabase → **New project**
-2. Name: `tiqueteira` · Region: **South America (São Paulo)**
-3. **Generate a password** e copiar
-4. Mandar a senha e o ID do projeto novo
-5. Depois que o novo estiver funcionando, apagar o antigo em
-   *Project Settings → General → Delete project*
+**Ação sua:** apagar o projeto `tiqueteira2`, que não está em uso.
 
 ### 2. Staging na Vercel — 15 minutos
 **Por quê:** último item do *Definition of Done* da Fase 0. Com ele, cada push
