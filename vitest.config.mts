@@ -12,6 +12,9 @@ export default defineConfig({
     // E2E é Playwright, roda por fora.
     exclude: ['tests/e2e/**', 'node_modules/**'],
     setupFiles: ['tests/setup.ts'],
+    // Banco remoto: cada ida e volta custa caro. O padrão de 5s derruba
+    // teste de integração legítimo.
+    testTimeout: 30_000,
     // Teste de concorrência de estoque não pode competir com outro teste
     // pelo mesmo banco.
     fileParallelism: false,

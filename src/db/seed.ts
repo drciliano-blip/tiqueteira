@@ -10,6 +10,7 @@
  * expirados, reembolso parcial, chargeback. Seed bonito demais esconde bug.
  */
 import { config } from 'dotenv';
+import { eq, sql as sqlOp } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -370,6 +371,11 @@ async function seed() {
       { status: 'chargeback', qtd: 2 },
     ];
 
+  // Quanto já foi reservado por tipo nesta execução. O contador do banco tem
+  // CHECK de estoque; sem controlar aqui, o seed tenta reservar em lote
+  // esgotado e o banco recusa — corretamente.
+  const reservadoLocal = new Map<string, number>();
+
   const contador = new Map<string, number>();
   const proximoNumero = (tenantId: string) => {
     const n = (contador.get(tenantId) ?? 0) + 1;
@@ -404,10 +410,19 @@ async function seed() {
       // Cortesia e PCD custam zero. Não existe reembolso nem chargeback de
       // zero — e o CHECK `refunds_valor_ck` recusa, corretamente. Esse pedido
       // vira apenas `paid`.
-      const statusEfetivo =
+      let statusEfetivo =
         total === 0 && ['refunded', 'partially_refunded', 'chargeback'].includes(status)
           ? ('paid' as const)
           : status;
+
+      // Pedido aguardando pagamento segura estoque de verdade. Se o lote
+      // sorteado já esgotou, este vira um pedido expirado — que é justamente
+      // o que aconteceria na vida real.
+      const jaReservado = reservadoLocal.get(tipo.id) ?? 0;
+      const disponivelNoTipo = tipo.quantidadeTotal - tipo.quantidadeVendida - jaReservado;
+      if (statusEfetivo === 'awaiting_payment' && quantidade > disponivelNoTipo) {
+        statusEfetivo = 'expired';
+      }
 
       const pago = ['paid', 'partially_refunded', 'refunded', 'chargeback'].includes(
         statusEfetivo,
@@ -462,6 +477,14 @@ async function seed() {
           quantidade,
           expiresEm: dias(0.007),
         });
+        // Reserva viva precisa aparecer no contador. Sem isto, o job de
+        // expiração devolve estoque que nunca foi retirado e o contador vai a
+        // negativo — o CHECK ticket_types_reservada_ck pegou isso em teste.
+        await db
+          .update(schema.ticketTypes)
+          .set({ quantidadeReservada: sqlOp`quantidade_reservada + ${quantidade}` })
+          .where(eq(schema.ticketTypes.id, tipo.id));
+        reservadoLocal.set(tipo.id, jaReservado + quantidade);
       } else if (statusEfetivo === 'expired') {
         await db.insert(schema.reservations).values({
           tenantId: tenant.id,
