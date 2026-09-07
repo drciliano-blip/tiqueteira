@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    name: Lint, tipos e testes
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tiqueteira_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # O teste de isolamento entre tenants só prova alguma coisa se a
+      # aplicação conectar com o papel sem BYPASSRLS. Ver ADR-007.
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/tiqueteira_test
+      DATABASE_URL: postgresql://tiqueteira_app:ci_app_pw@localhost:5432/tiqueteira_test
+      SERVICE_DATABASE_URL: postgresql://tiqueteira_service:ci_service_pw@localhost:5432/tiqueteira_test
+      APP_DB_PASSWORD: ci_app_pw
+      SERVICE_DB_PASSWORD: ci_service_pw
+      AUTH_SECRET: ci-secret-com-mais-de-trinta-e-dois-caracteres
+      TICKET_HMAC_SECRET: ci-hmac-com-mais-de-trinta-e-dois-caracteres
+      JOB_SECRET: ci-job-secret-suficiente
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      PAYMENT_PROVIDER: fake
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Tipos
+        run: pnpm typecheck
+
+      - name: Migrations
+        run: pnpm db:migrate
+
+      - name: RLS
+        run: pnpm db:rls
+
+      - name: Testes
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
