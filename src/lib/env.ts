@@ -7,6 +7,15 @@ import { z } from 'zod';
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
+  /**
+   * Ambiente do PRODUTO, que não é o mesmo que o ambiente do Node.
+   *
+   * A Vercel marca NODE_ENV=production em todo deploy, staging incluído. Usar
+   * NODE_ENV para decidir regra de negócio faria o staging se comportar como
+   * produção — e, no nosso caso, se recusar a subir com o provider falso.
+   */
+  APP_ENV: z.enum(['development', 'staging', 'production']).default('development'),
+
   DATABASE_URL: z.string().min(1, 'DATABASE_URL é obrigatória'),
   DIRECT_URL: z.string().min(1).optional(),
   SERVICE_DATABASE_URL: z.string().min(1).optional(),
@@ -43,7 +52,7 @@ export function env(): z.infer<typeof schema> {
   }
 
   // Regra do plano, seção 15: o provider falso não pode chegar em produção.
-  if (parsed.data.NODE_ENV === 'production' && parsed.data.PAYMENT_PROVIDER === 'fake') {
+  if (parsed.data.APP_ENV === 'production' && parsed.data.PAYMENT_PROVIDER === 'fake') {
     throw new Error(
       'PAYMENT_PROVIDER=fake é proibido em produção. ' +
         'Configure a PSP real antes de subir.',

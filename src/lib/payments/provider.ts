@@ -60,7 +60,9 @@ export function criarProvider(
   nome: string,
   opcoes: { webhookSecret?: string; producao?: boolean } = {},
 ): PaymentProvider {
-  const producao = opcoes.producao ?? process.env.NODE_ENV === 'production';
+  // APP_ENV, não NODE_ENV: na Vercel todo deploy é NODE_ENV=production,
+  // inclusive o de staging. Ver src/lib/env.ts.
+  const producao = opcoes.producao ?? process.env.APP_ENV === 'production';
 
   if (nome === 'fake') {
     // Regra do plano, seção 15. Vale mesmo com o resto do ambiente correto.
