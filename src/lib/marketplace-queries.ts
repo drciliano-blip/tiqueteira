@@ -89,7 +89,13 @@ export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<
 
   if (linhas.length === 0) return [];
 
-  // Preço mínimo entre os lotes que ainda podem ser comprados.
+  /**
+   * Preço mínimo entre os lotes que ainda podem ser comprados.
+   *
+   * Gratuidade legal (PCD, idoso) e cortesia ficam de fora: um evento com
+   * ingresso de PCD a R$ 0 anunciaria "a partir de R$ 0,00", o que é falso
+   * para quem paga e é o tipo de promessa que gera reclamação na porta.
+   */
   const precos = await db
     .select({
       eventId: ticketTypes.eventId,
@@ -103,6 +109,7 @@ export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<
           linhas.map((l) => l.id),
         ),
         eq(ticketTypes.ativo, true),
+        inArray(ticketTypes.tipo, ['inteira', 'meia']),
         sql`${ticketTypes.quantidadeVendida} + ${ticketTypes.quantidadeReservada} < ${ticketTypes.quantidadeTotal}`,
         sql`now() between ${ticketTypes.vendasInicio} and ${ticketTypes.vendasFim}`,
       ),

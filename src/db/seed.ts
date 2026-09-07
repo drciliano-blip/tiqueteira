@@ -43,6 +43,17 @@ function escolher<T>(lista: readonly T[]): T {
 
 const dias = (n: number) => new Date(Date.now() + n * 24 * 60 * 60 * 1000);
 
+/**
+ * Data a N dias, no horário civil de São Paulo (UTC-3).
+ * Festa começa às 22h, não às 19h19 — e demonstração com horário torto faz
+ * parecer que o fuso está errado quando não está.
+ */
+const noite = (n: number, horaLocal: number, minuto = 0) => {
+  const d = dias(n);
+  d.setUTCHours(horaLocal + 3, minuto, 0, 0);
+  return d;
+};
+
 // ---------------------------------------------------------------------------
 
 async function limpar() {
@@ -185,8 +196,8 @@ async function seed() {
         politicaReembolso:
           'Cancelamento em até 7 dias da compra, com devolução integral. ' +
           'Depois disso, até 48h antes do evento.',
-        dataInicio: dias(30),
-        dataFim: dias(30.4),
+        dataInicio: noite(30, 22),
+        dataFim: noite(31, 5),
         capacidade: 1200,
         status: 'publicado',
         ingressoNominal: true,
@@ -198,8 +209,8 @@ async function seed() {
         slug: 'solon-sunset',
         titulo: 'Solon Sunset',
         descricao: 'Pôr do sol no rooftop do Espaço Solon, com DJ residente.',
-        dataInicio: dias(12),
-        dataFim: dias(12.3),
+        dataInicio: noite(12, 17),
+        dataFim: noite(12, 23),
         capacidade: 400,
         status: 'esgotado',
         ingressoNominal: true,
@@ -209,8 +220,8 @@ async function seed() {
         venueId: jussara.id,
         slug: 'retro-jussara',
         titulo: 'Retrô Jussara',
-        dataInicio: dias(-20),
-        dataFim: dias(-19.7),
+        dataInicio: noite(-20, 23),
+        dataFim: noite(-19, 6),
         capacidade: 900,
         status: 'encerrado',
         ingressoNominal: false,
@@ -220,8 +231,8 @@ async function seed() {
         venueId: fabrique.id,
         slug: 'hey-hey-open-air',
         titulo: 'Hey Hey Open Air',
-        dataInicio: dias(45),
-        dataFim: dias(45.5),
+        dataInicio: noite(45, 21),
+        dataFim: noite(46, 6),
         capacidade: 800,
         status: 'cancelado',
         canceladoEm: dias(-2),

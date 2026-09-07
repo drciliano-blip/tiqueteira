@@ -147,6 +147,7 @@ export async function listarEventosDoTenant(tenantId: string): Promise<EventoRes
       .select({
         eventId: ticketTypes.eventId,
         precoCentavos: ticketTypes.precoCentavos,
+        tipo: ticketTypes.tipo,
         ativo: ticketTypes.ativo,
         quantidadeTotal: ticketTypes.quantidadeTotal,
         quantidadeVendida: ticketTypes.quantidadeVendida,
@@ -163,6 +164,8 @@ export async function listarEventosDoTenant(tenantId: string): Promise<EventoRes
     const minimoPorEvento = new Map<string, number>();
     for (const lote of lotes) {
       if (!lote.ativo || disponivel(lote) <= 0) continue;
+      // Gratuidade legal não define o "a partir de" — ver marketplace-queries.
+      if (lote.tipo !== 'inteira' && lote.tipo !== 'meia') continue;
       const atual = minimoPorEvento.get(lote.eventId);
       if (atual === undefined || lote.precoCentavos < atual) {
         minimoPorEvento.set(lote.eventId, lote.precoCentavos);

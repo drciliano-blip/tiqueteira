@@ -19,7 +19,7 @@ export function dataCurta(d: Date): string {
       month: 'short',
       timeZone: FUSO,
     }).format(d),
-  ).replace(/\.$/, '');
+  ).replaceAll('.', '');
 }
 
 /** "Sábado, 7 de outubro de 2026" */
