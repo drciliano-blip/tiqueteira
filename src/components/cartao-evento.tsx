@@ -3,7 +3,22 @@ import Link from 'next/link';
 import { Cartaz } from '@/components/cartaz';
 import { dataCurta, hora } from '@/lib/datas';
 import { formatarBRL } from '@/lib/money';
-import type { EventoResumo } from '@/lib/public-queries';
+/**
+ * Aceita tanto o resumo da vitrine de um produtor quanto o da home da
+ * plataforma. Quando `tenantNome` vem preenchido, o cartão mostra de quem é
+ * o evento — na home isso é informação; na vitrine do produtor seria ruído.
+ */
+export type EventoCartao = {
+  id: string;
+  slug: string;
+  titulo: string;
+  imagemUrl: string | null;
+  dataInicio: Date;
+  status: string;
+  venueNome: string;
+  cidade: string | null;
+  precoMinimoCentavos: number | null;
+};
 
 /**
  * Cartão da vitrine: cartaz, título, data, local e preço mínimo.
@@ -12,10 +27,12 @@ import type { EventoResumo } from '@/lib/public-queries';
 export function CartaoEvento({
   evento,
   tenantSlug,
+  tenantNome,
   prioridade = false,
 }: {
-  evento: EventoResumo;
+  evento: EventoCartao;
   tenantSlug: string;
+  tenantNome?: string;
   prioridade?: boolean;
 }) {
   const esgotado = evento.status === 'esgotado' || evento.precoMinimoCentavos === null;
@@ -56,6 +73,9 @@ export function CartaoEvento({
           {evento.venueNome}
           {evento.cidade ? ` · ${evento.cidade}` : ''}
         </p>
+        {tenantNome && (
+          <p className="mt-0.5 truncate text-xs text-faint">por {tenantNome}</p>
+        )}
 
         {!esgotado && (
           <p className="tabular mt-2 text-sm">
