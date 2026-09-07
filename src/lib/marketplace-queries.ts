@@ -15,9 +15,24 @@ import 'server-only';
 import { and, asc, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
 
 import { serviceDb } from '@/db/client';
-import { events, tenants, ticketTypes, venues } from '@/db/schema';
+import { events, orders, tenants, ticketTypes, venues } from '@/db/schema';
 
 const VISIVEIS = ['publicado', 'esgotado'] as const;
+
+/** Rótulos das categorias, para menu e filtro. */
+export const CATEGORIAS = [
+  { valor: 'festa', rotulo: 'Festas' },
+  { valor: 'show', rotulo: 'Shows' },
+  { valor: 'teatro', rotulo: 'Teatro' },
+  { valor: 'stand_up', rotulo: 'Stand-up' },
+  { valor: 'esporte', rotulo: 'Esporte' },
+  { valor: 'gastronomia', rotulo: 'Gastronomia' },
+  { valor: 'curso', rotulo: 'Cursos' },
+  { valor: 'infantil', rotulo: 'Infantil' },
+  { valor: 'outro', rotulo: 'Outros' },
+] as const;
+
+export type Categoria = (typeof CATEGORIAS)[number]['valor'];
 
 export type EventoVitrine = {
   id: string;
@@ -29,6 +44,7 @@ export type EventoVitrine = {
   venueNome: string;
   cidade: string | null;
   uf: string | null;
+  categoria: string;
   tenantSlug: string;
   tenantNome: string;
   precoMinimoCentavos: number | null;
@@ -38,6 +54,7 @@ type Filtros = {
   /** Busca por título do evento, nome do espaço ou nome do produtor. */
   busca?: string;
   cidade?: string;
+  categoria?: string;
   limite?: number;
 };
 
@@ -66,6 +83,10 @@ export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<
     condicoes.push(eq(venues.cidade, filtros.cidade));
   }
 
+  if (filtros.categoria && CATEGORIAS.some((c) => c.valor === filtros.categoria)) {
+    condicoes.push(eq(events.categoria, filtros.categoria as Categoria));
+  }
+
   const linhas = await db
     .select({
       id: events.id,
@@ -77,6 +98,7 @@ export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<
       venueNome: venues.nome,
       cidade: venues.cidade,
       uf: venues.uf,
+      categoria: events.categoria,
       tenantSlug: tenants.slug,
       tenantNome: tenants.nome,
     })
@@ -122,6 +144,42 @@ export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<
     ...l,
     precoMinimoCentavos: minimoPorEvento.get(l.id) ?? null,
   }));
+}
+
+/**
+ * Eventos mais vendidos nas últimas 24 horas.
+ *
+ * Prova social honesta: é contagem real de pedidos pagos, não curadoria
+ * disfarçada de "destaque". Se ninguém comprou, a seção não aparece.
+ */
+export async function listarMaisVendidos(limite = 8): Promise<EventoVitrine[]> {
+  const db = serviceDb();
+
+  const ranking = await db
+    .select({
+      eventId: orders.eventId,
+      pedidos: sql<number>`count(*)`,
+    })
+    .from(orders)
+    .where(
+      and(
+        inArray(orders.status, ['paid', 'partially_refunded']),
+        sql`${orders.pagoEm} >= now() - interval '24 hours'`,
+      ),
+    )
+    .groupBy(orders.eventId)
+    .orderBy(sql`count(*) desc`)
+    .limit(limite);
+
+  if (ranking.length === 0) return [];
+
+  const ids = ranking.map((r) => r.eventId);
+  const eventos = await listarEventosDaPlataforma({ limite: 60 });
+
+  // Preserva a ordem do ranking; eventos já encerrados somem naturalmente,
+  // porque `listarEventosDaPlataforma` só devolve o que ainda está à venda.
+  const porId = new Map(eventos.map((e) => [e.id, e]));
+  return ids.map((id) => porId.get(id)).filter((e): e is EventoVitrine => Boolean(e));
 }
 
 /** Cidades com evento à venda, para o filtro da home. */

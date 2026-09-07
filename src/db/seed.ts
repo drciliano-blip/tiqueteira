@@ -188,6 +188,7 @@ async function seed() {
         tenantId: superFestas.id,
         venueId: jussara.id,
         slug: 'baile-do-jussara-2026',
+        categoria: 'festa',
         titulo: 'Baile do Jussara 2026',
         descricao:
           'A festa que abre a temporada no Complexo Jussara. Três ambientes, '
@@ -207,6 +208,7 @@ async function seed() {
         tenantId: superFestas.id,
         venueId: solon.id,
         slug: 'solon-sunset',
+        categoria: 'show',
         titulo: 'Solon Sunset',
         descricao: 'Pôr do sol no rooftop do Espaço Solon, com DJ residente.',
         dataInicio: noite(12, 17),
@@ -219,6 +221,7 @@ async function seed() {
         tenantId: superFestas.id,
         venueId: jussara.id,
         slug: 'retro-jussara',
+        categoria: 'festa',
         titulo: 'Retrô Jussara',
         dataInicio: noite(-20, 23),
         dataFim: noite(-19, 6),
@@ -230,6 +233,7 @@ async function seed() {
         tenantId: heyHey.id,
         venueId: fabrique.id,
         slug: 'hey-hey-open-air',
+        categoria: 'show',
         titulo: 'Hey Hey Open Air',
         dataInicio: noite(45, 21),
         dataFim: noite(46, 6),

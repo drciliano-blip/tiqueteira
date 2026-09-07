@@ -72,6 +72,25 @@ export const eventStatusEnum = pgEnum('event_status', [
   'adiado',
 ]);
 
+/**
+ * Categoria do evento.
+ *
+ * A navegação principal de uma tiqueteira é por categoria e cidade, não por
+ * busca digitada — é assim que o público explora quando ainda não sabe o que
+ * quer. Sem categoria, a home só serve a quem já sabe o nome do evento.
+ */
+export const eventCategoryEnum = pgEnum('event_category', [
+  'festa',
+  'show',
+  'teatro',
+  'stand_up',
+  'esporte',
+  'gastronomia',
+  'curso',
+  'infantil',
+  'outro',
+]);
+
 export const ticketKindEnum = pgEnum('ticket_kind', [
   'inteira',
   'meia',
@@ -369,6 +388,7 @@ export const events = pgTable(
 
     dataInicio: timestamp('data_inicio', { withTimezone: true }).notNull(),
     dataFim: timestamp('data_fim', { withTimezone: true }).notNull(),
+    categoria: eventCategoryEnum('categoria').notNull().default('festa'),
     classificacaoEtaria: integer('classificacao_etaria').notNull().default(18),
     /** Nunca maior que venues.capacidade_maxima. Validado na aplicação. */
     capacidade: integer('capacidade').notNull(),
@@ -416,6 +436,7 @@ export const events = pgTable(
     uniqueIndex('events_tenant_slug_key').on(t.tenantId, t.slug),
     index('events_tenant_status_idx').on(t.tenantId, t.status),
     index('events_data_inicio_idx').on(t.dataInicio),
+    index('events_categoria_idx').on(t.categoria, t.dataInicio),
     check('events_periodo_ck', sql`${t.dataFim} > ${t.dataInicio}`),
     check('events_capacidade_ck', sql`${t.capacidade} > 0`),
     check('events_cota_meia_ck', sql`${t.cotaMeiaBps} between 0 and 10000`),

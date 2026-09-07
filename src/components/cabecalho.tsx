@@ -32,6 +32,12 @@ export async function Cabecalho({ comBusca = true }: { comBusca?: boolean }) {
 
         <nav className="ml-auto flex items-center gap-1 sm:gap-2">
           <Link
+            href="/como-funciona"
+            className="hidden rounded-botao px-3 py-2 text-sm text-muted transition hover:text-txt lg:block"
+          >
+            Como funciona
+          </Link>
+          <Link
             href="/meus-ingressos"
             className="rounded-botao px-3 py-2 text-sm text-muted transition hover:text-txt"
           >

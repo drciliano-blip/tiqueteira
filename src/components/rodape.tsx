@@ -22,8 +22,8 @@ export function Rodape() {
               </Link>
             </li>
             <li>
-              <Link href="/ajuda" className="transition hover:text-txt">
-                Central de ajuda
+              <Link href="/como-funciona" className="transition hover:text-txt">
+                Como funciona
               </Link>
             </li>
           </ul>
