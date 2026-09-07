@@ -76,6 +76,8 @@ async function seed() {
         telefone: '11987654321',
         kycStatus: 'aprovado',
         providerRecipientId: 'fake_rcpt_super',
+        corAcento: '#FF3D68',
+        taxaMinimaCentavos: 399,
         taxaConvenienciaBps: 1000, // 10,00%
         comissaoBps: 500, //  5,00%
         taxaFixaCentavos: 150, // R$ 1,50 por ingresso
@@ -90,6 +92,8 @@ async function seed() {
         email: 'financeiro@heyhey.com.br',
         telefone: '11912345678',
         kycStatus: 'em_analise', // ainda não pode receber repasse
+        corAcento: '#22D3A6',
+        taxaMinimaCentavos: 399,
         taxaConvenienciaBps: 1200,
         comissaoBps: 0,
         taxaFixaCentavos: 0,
@@ -174,7 +178,13 @@ async function seed() {
         venueId: jussara.id,
         slug: 'baile-do-jussara-2026',
         titulo: 'Baile do Jussara 2026',
-        descricao: 'A festa que abre a temporada.',
+        descricao:
+          'A festa que abre a temporada no Complexo Jussara. Três ambientes, '
+          + 'line-up de house e brasilidades até as 6h. Open bar de boas-vindas '
+          + 'até a meia-noite para quem chegar cedo.',
+        politicaReembolso:
+          'Cancelamento em até 7 dias da compra, com devolução integral. ' +
+          'Depois disso, até 48h antes do evento.',
         dataInicio: dias(30),
         dataFim: dias(30.4),
         capacidade: 1200,
@@ -187,6 +197,7 @@ async function seed() {
         venueId: solon.id,
         slug: 'solon-sunset',
         titulo: 'Solon Sunset',
+        descricao: 'Pôr do sol no rooftop do Espaço Solon, com DJ residente.',
         dataInicio: dias(12),
         dataFim: dias(12.3),
         capacidade: 400,
@@ -510,7 +521,7 @@ async function seed() {
             eventId: evento.id,
             codigo: `${criados.toString(36).toUpperCase().padStart(4, '0')}-${t}${inteiro(100, 999)}`,
             tokenHash: `seedhash_${criados}_${t}`,
-            titularNome: pedido.compradorNome,
+            titularNome: pedido.compradorNome ?? 'Comprador',
             titularCpf: pedido.compradorCpf,
             titularEmail: pedido.compradorEmail,
             status: cancelados ? 'cancelado' : usado ? 'usado' : 'valido',

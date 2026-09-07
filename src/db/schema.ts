@@ -528,10 +528,17 @@ export const orders = pgTable(
     /** Sequencial por tenant, para o cliente citar no suporte. */
     numero: integer('numero').notNull(),
 
-    compradorNome: text('comprador_nome').notNull(),
-    compradorEmail: text('comprador_email').notNull(),
+    /**
+     * Nulos enquanto o pedido é `draft`: a reserva de estoque acontece no
+     * clique em "Comprar", antes de o comprador preencher qualquer coisa —
+     * é isso que garante que ele não perca o ingresso enquanto digita.
+     * O CHECK `orders_comprador_ck` exige o preenchimento a partir de
+     * `awaiting_payment`.
+     */
+    compradorNome: text('comprador_nome'),
+    compradorEmail: text('comprador_email'),
     /** Só dígitos. LGPD: propósito declarado, mascarado na interface. */
-    compradorCpf: text('comprador_cpf').notNull(),
+    compradorCpf: text('comprador_cpf'),
     compradorTelefone: text('comprador_telefone'),
 
     subtotalCentavos: cents('subtotal_centavos').notNull(),
@@ -606,6 +613,11 @@ export const orders = pgTable(
       sql`${t.totalCentavos} = ${t.subtotalCentavos} + ${t.convenienciaCentavos} - ${t.descontoCentavos}`,
     ),
     check('orders_parcelas_ck', sql`${t.parcelas} is null or ${t.parcelas} between 1 and 12`),
+    check(
+      'orders_comprador_ck',
+      sql`${t.status} = 'draft' or (${t.compradorNome} is not null
+          and ${t.compradorEmail} is not null and ${t.compradorCpf} is not null)`,
+    ),
     // Venda de PDV não tem transação na PSP; venda online não tem método externo.
     check(
       'orders_canal_ck',

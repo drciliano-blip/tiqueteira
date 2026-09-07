@@ -22,14 +22,38 @@ import { serviceDb, withTenant } from '@/db/client';
 import { events, tenants, ticketTypes, venues } from '@/db/schema';
 import { disponivel } from '@/domain/inventory';
 
-export type TenantPublico = { id: string; slug: string; nome: string };
+export type TenantPublico = {
+  id: string;
+  slug: string;
+  nome: string;
+  corAcento: string;
+  logoUrl: string | null;
+  /**
+   * Taxa de conveniência. Exposta de propósito: a exibição destacada é
+   * obrigatória no checkout, e há histórico de autuação de Procon por taxa
+   * embutida. O cálculo que vale é sempre o do servidor — isto aqui é para a
+   * tela poder mostrar o valor antes de o pedido existir.
+   */
+  taxaConvenienciaBps: number;
+  taxaAbsorvidaPeloProdutor: boolean;
+  taxaMinimaCentavos: number;
+};
 
 /** Estados em que um evento aparece na vitrine. */
 const VISIVEIS = ['publicado', 'esgotado'] as const;
 
 export async function resolverTenantPorSlug(slug: string): Promise<TenantPublico | null> {
   const [linha] = await serviceDb()
-    .select({ id: tenants.id, slug: tenants.slug, nome: tenants.nome })
+    .select({
+      id: tenants.id,
+      slug: tenants.slug,
+      nome: tenants.nome,
+      corAcento: tenants.corAcento,
+      logoUrl: tenants.logoUrl,
+      taxaConvenienciaBps: tenants.taxaConvenienciaBps,
+      taxaAbsorvidaPeloProdutor: tenants.taxaAbsorvidaPeloProdutor,
+      taxaMinimaCentavos: tenants.taxaMinimaCentavos,
+    })
     .from(tenants)
     .where(and(eq(tenants.slug, slug), eq(tenants.status, 'ativo')))
     .limit(1);
@@ -40,7 +64,16 @@ export async function resolverTenantPorSlug(slug: string): Promise<TenantPublico
 /** Vitrine: produtores ativos que têm ao menos um evento à venda. */
 export async function listarProdutores(): Promise<TenantPublico[]> {
   return serviceDb()
-    .selectDistinct({ id: tenants.id, slug: tenants.slug, nome: tenants.nome })
+    .selectDistinct({
+      id: tenants.id,
+      slug: tenants.slug,
+      nome: tenants.nome,
+      corAcento: tenants.corAcento,
+      logoUrl: tenants.logoUrl,
+      taxaConvenienciaBps: tenants.taxaConvenienciaBps,
+      taxaAbsorvidaPeloProdutor: tenants.taxaAbsorvidaPeloProdutor,
+      taxaMinimaCentavos: tenants.taxaMinimaCentavos,
+    })
     .from(tenants)
     .innerJoin(events, eq(events.tenantId, tenants.id))
     .where(
@@ -51,6 +84,30 @@ export async function listarProdutores(): Promise<TenantPublico[]> {
       ),
     )
     .orderBy(asc(tenants.nome));
+}
+
+/**
+ * Configuração de taxa do produtor, para o cálculo no servidor.
+ *
+ * Separada de `TenantPublico` de propósito: `comissaoBps` é invisível ao
+ * comprador, e tipo que chega a componente de tela é tipo que uma hora
+ * alguém renderiza sem querer.
+ */
+export async function configDeTaxasDoTenant(tenantId: string) {
+  const [linha] = await serviceDb()
+    .select({
+      taxaConvenienciaBps: tenants.taxaConvenienciaBps,
+      comissaoBps: tenants.comissaoBps,
+      taxaFixaCentavos: tenants.taxaFixaCentavos,
+      taxaMinimaCentavos: tenants.taxaMinimaCentavos,
+      taxaAbsorvidaPeloProdutor: tenants.taxaAbsorvidaPeloProdutor,
+    })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+
+  if (!linha) throw new Error(`Tenant ${tenantId} não existe`);
+  return linha;
 }
 
 export type EventoResumo = {
@@ -145,6 +202,8 @@ export type EventoPublico = {
   dataFim: Date;
   classificacaoEtaria: number;
   status: string;
+  /** Sobrepõe a cor do produtor quando o evento tem identidade própria. */
+  corAcento: string | null;
   ingressoNominal: boolean;
   exigeDocumentoEntrada: boolean;
   politicaReembolso: string | null;
@@ -183,6 +242,7 @@ export async function buscarEventoPublico(
         dataFim: events.dataFim,
         classificacaoEtaria: events.classificacaoEtaria,
         status: events.status,
+        corAcento: events.corAcento,
         ingressoNominal: events.ingressoNominal,
         exigeDocumentoEntrada: events.exigeDocumentoEntrada,
         politicaReembolso: events.politicaReembolso,
@@ -249,6 +309,7 @@ export async function buscarEventoPublico(
       dataFim: evento.dataFim,
       classificacaoEtaria: evento.classificacaoEtaria,
       status: evento.status,
+      corAcento: evento.corAcento,
       ingressoNominal: evento.ingressoNominal,
       exigeDocumentoEntrada: evento.exigeDocumentoEntrada,
       politicaReembolso: evento.politicaReembolso,

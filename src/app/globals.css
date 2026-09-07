@@ -1,57 +1,84 @@
 @import 'tailwindcss';
 
 /**
- * Sistema visual da loja pública.
+ * Sistema visual — docs/benchmark-e-design.md, seção 4.
  *
- * Escuro por padrão: a vitrine compete com o cartaz do evento, e fundo escuro
- * faz a imagem do evento aparecer em vez de brigar com o branco da página.
- * Tudo em tokens, para que o tema por produtor (Fase 4) seja troca de
- * variável, não reescrita de componente.
+ * A ideia central: nosso conteúdo é o cartaz da festa. A interface é moldura
+ * silenciosa; a cor vem do produtor, não do sistema.
+ *
+ * `--color-accent` aponta para `--tenant-accent`, que é injetado na raiz do
+ * documento na renderização da vitrine (ver src/components/tema-tenant.tsx).
+ * Como é referência de variável, e não valor fixo, a troca acontece em tempo
+ * de execução — sem recompilar CSS e sem classe condicional espalhada pelo
+ * código.
  */
 @theme {
-  --color-fundo: oklch(0.16 0.012 275);
-  --color-fundo-elevado: oklch(0.21 0.014 275);
-  --color-fundo-cartao: oklch(0.24 0.016 275);
-  --color-borda: oklch(0.32 0.018 275);
-  --color-borda-forte: oklch(0.42 0.02 275);
+  /* Base — tom de tinta, viés frio. Preto puro achata a arte e cansa a vista
+     em tela de celular à noite. */
+  --color-base: #12131a;
+  --color-raised: #1c1e28;
+  --color-line: #2a2d3a;
+  --color-line-forte: #3d4152;
 
-  --color-texto: oklch(0.97 0.005 275);
-  --color-texto-suave: oklch(0.76 0.015 275);
-  --color-texto-fraco: oklch(0.6 0.018 275);
+  /* Texto — off-white levemente quente. Branco puro sobre escuro vibra. */
+  --color-txt: #f2f0eb;
+  --color-muted: #8a8b99;
+  --color-faint: #63667a;
 
-  --color-destaque: oklch(0.68 0.19 305);
-  --color-destaque-forte: oklch(0.74 0.2 305);
-  --color-destaque-fundo: oklch(0.28 0.08 305);
+  /* Acento — vem do produtor. */
+  --color-accent: var(--tenant-accent, #5b4bff);
+  --color-accent-txt: var(--tenant-accent-txt, #ffffff);
 
-  --color-sucesso: oklch(0.72 0.16 155);
-  --color-alerta: oklch(0.78 0.15 80);
-  --color-erro: oklch(0.65 0.2 25);
+  --color-sucesso: #2fbf71;
+  --color-alerta: #e8a33d;
+  --color-perigo: #e5484d;
 
+  --font-titulo: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
-  --radius-cartao: 0.875rem;
+  /* Escala tipográfica: 12 / 14 / 16 / 20 / 28 / 40 / 56 */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.5rem;
+  --text-3xl: 3.5rem;
+
+  --radius-cartao: 0.75rem;
+  --radius-botao: 0.625rem;
 }
 
 html {
-  background-color: var(--color-fundo);
+  background-color: var(--color-base);
   color-scheme: dark;
+  /* Sem salto horizontal quando a barra de compra fixa aparece. */
+  scrollbar-gutter: stable;
 }
 
 body {
-  background-color: var(--color-fundo);
-  color: var(--color-texto);
+  background-color: var(--color-base);
+  color: var(--color-txt);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Números de preço e data alinham melhor com altura uniforme. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-titulo);
+  letter-spacing: -0.02em;
+}
+
+/* Preço e data em coluna precisam de dígito de largura fixa. */
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 
-::selection {
-  background-color: var(--color-destaque-fundo);
-  color: var(--color-texto);
+/* Corpo de texto com no máximo ~70 caracteres por linha. */
+.prosa {
+  max-width: 62ch;
+  line-height: 1.65;
 }
 
 a {
@@ -59,7 +86,26 @@ a {
   text-decoration: none;
 }
 
+::selection {
+  background-color: color-mix(in oklab, var(--color-accent) 45%, transparent);
+  color: var(--color-txt);
+}
+
+/* Foco visível sempre — navegação por teclado é requisito, não enfeite. */
 :focus-visible {
-  outline: 2px solid var(--color-destaque);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Quem pediu menos movimento recebe menos movimento. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
