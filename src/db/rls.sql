@@ -75,7 +75,8 @@ declare
   tabelas text[] := array[
     'venues', 'events', 'ticket_types', 'coupons',
     'orders', 'order_items', 'reservations', 'tickets',
-    'payouts', 'refunds', 'chargebacks', 'memberships'
+    'payouts', 'refunds', 'chargebacks', 'memberships',
+    'event_splits', 'guest_lists', 'guest_list_entries'
   ];
 begin
   foreach t in array tabelas loop
@@ -117,6 +118,8 @@ revoke insert, update, delete on public.audit_log from tiqueteira_app;
 --   não há política de tenant que faça sentido. O caminho de autenticação usa
 --   a conexão de serviço.
 -- `webhook_events` e `jobs`: o webhook da PSP chega sem contexto de tenant.
+-- `buyer_access_tokens`: o mesmo e-mail compra de vários produtores; o link
+--   mágico é resolvido antes de existir tenant.
 --
 -- RLS ligada sem nenhuma política = ninguém passa, exceto BYPASSRLS.
 -- O revoke é a segunda tranca.
@@ -124,7 +127,9 @@ revoke insert, update, delete on public.audit_log from tiqueteira_app;
 do $$
 declare
   t text;
-  tabelas text[] := array['users', 'sessions', 'webhook_events', 'jobs', 'tenants'];
+  tabelas text[] := array[
+    'users', 'sessions', 'webhook_events', 'jobs', 'tenants', 'buyer_access_tokens'
+  ];
 begin
   foreach t in array tabelas loop
     execute format('alter table public.%I enable row level security', t);

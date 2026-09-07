@@ -143,6 +143,32 @@ export const chargebackStatusEnum = pgEnum('chargeback_status', [
   'perdido',
 ]);
 
+export const refundTypeEnum = pgEnum('refund_type', [
+  'arrependimento_legal',
+  'politica_evento',
+  'evento_cancelado',
+  'chargeback',
+  'outro',
+]);
+
+/**
+ * Por onde a venda entrou. `pdv` e `lista` não passam pela PSP: o dinheiro já
+ * está com a casa, ou não houve dinheiro. Separar isso do meio de pagamento
+ * evita o erro clássico de somar bilheteria física ao bruto do repasse.
+ */
+export const salesChannelEnum = pgEnum('sales_channel', ['online', 'pdv', 'lista']);
+
+/** Forma de pagamento fora da PSP, na bilheteria física. */
+export const externalPaymentEnum = pgEnum('external_payment', [
+  'dinheiro',
+  'debito',
+  'credito',
+  'cortesia',
+  'outro',
+]);
+
+export const guestEntryTypeEnum = pgEnum('guest_entry_type', ['cortesia', 'desconto']);
+
 export const jobStatusEnum = pgEnum('job_status', [
   'pending',
   'running',
@@ -182,6 +208,30 @@ export const tenants = pgTable(
     diasLiberacaoEvento: integer('dias_liberacao_evento').notNull().default(2),
     diasLiberacaoReserva: integer('dias_liberacao_reserva').notNull().default(35),
 
+    // Identidade visual da vitrine — benchmark, seção 4.2.
+    // Uma tiqueteira white-label não pode ter uma cor só: a cor vem do
+    // produtor e é injetada como token na raiz do documento.
+    corAcento: text('cor_acento').notNull().default('#5B4BFF'),
+    logoUrl: text('logo_url'),
+
+    // Modelo de taxa — benchmark, seção 2.7
+    /** Se true, o comprador paga o preço de face e o produtor recebe menos. */
+    taxaAbsorvidaPeloProdutor: boolean('taxa_absorvida_pelo_produtor').notNull().default(false),
+    /** Piso da conveniência. Protege a margem em ingresso barato. */
+    taxaMinimaCentavos: cents('taxa_minima_centavos').notNull().default(0),
+    /**
+     * Quem paga os juros do parcelamento. Nenhum dos documentos definia isso,
+     * e é dinheiro: em 6x, ou o comprador paga mais, ou o produtor recebe menos.
+     */
+    jurosParcelamentoAbsorvidos: boolean('juros_parcelamento_absorvidos')
+      .notNull()
+      .default(false),
+
+    // Marketing. Produtor de festa compra tráfego no Instagram; sem pixel de
+    // conversão ele não mede retorno — e é a primeira pergunta que ele faz.
+    pixelMetaId: text('pixel_meta_id'),
+    googleAnalyticsId: text('google_analytics_id'),
+
     // Domínio customizado (Fase 4)
     dominioCustomizado: text('dominio_customizado'),
     dominioVerificado: boolean('dominio_verificado').notNull().default(false),
@@ -197,6 +247,7 @@ export const tenants = pgTable(
     check('tenants_taxa_fixa_ck', sql`${t.taxaFixaCentavos} >= 0`),
     check('tenants_reserva_pix_ck', sql`${t.reservaPixBps} between 0 and 10000`),
     check('tenants_reserva_cartao_ck', sql`${t.reservaCartaoBps} between 0 and 10000`),
+    check('tenants_taxa_minima_ck', sql`${t.taxaMinimaCentavos} >= 0`),
   ],
 );
 
@@ -336,6 +387,21 @@ export const events = pgTable(
     maxTransferenciasPorIngresso: integer('max_transferencias_por_ingresso').notNull().default(1),
     taxaTransferenciaCentavos: cents('taxa_transferencia_centavos').notNull().default(0),
     transferenciaPermiteMeia: boolean('transferencia_permite_meia').notNull().default(false),
+
+    // Política de cancelamento — benchmark, seções 2.1 e 2.5
+    /** Arrependimento legal (CDC art. 49). */
+    cancelamentoAteDiasCompra: integer('cancelamento_ate_dias_compra').notNull().default(7),
+    /** Se faltarem 7 dias ou menos para o evento, vale este limite. */
+    cancelamentoAteHorasEvento: integer('cancelamento_ate_horas_evento').notNull().default(48),
+    /** Onde discordamos da Sympla: cancelar um ingresso sem cancelar o pedido. */
+    permiteReembolsoParcial: boolean('permite_reembolso_parcial').notNull().default(true),
+    /** Janela do produtor para cancelar pedido depois do evento. */
+    cancelamentoProdutorAteHorasPos: integer('cancelamento_produtor_ate_horas_pos')
+      .notNull()
+      .default(48),
+
+    /** Sobrepõe a cor do produtor quando o evento tem identidade própria. */
+    corAcento: text('cor_acento'),
 
     // Meia-entrada — ADR-004
     cotaMeiaBps: bps('cota_meia_bps').notNull().default(4000),
@@ -486,6 +552,25 @@ export const orders = pgTable(
     metodo: paymentMethodEnum('metodo'),
     parcelas: integer('parcelas'),
 
+    /**
+     * Canal da venda. Boa parte do faturamento de casa noturna entra na
+     * bilheteria física; se o sistema não registra, o contador de público, o
+     * relatório do ECAD e o painel do produtor ficam todos errados.
+     */
+    canal: salesChannelEnum('canal').notNull().default('online'),
+    /** Venda na porta: o dinheiro já está com a casa e NÃO entra no split. */
+    metodoExterno: externalPaymentEnum('metodo_externo'),
+    pdvOperadorId: uuid('pdv_operador_id').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
+
+    // Origem da venda, para o produtor medir campanha.
+    utmSource: text('utm_source'),
+    utmMedium: text('utm_medium'),
+    utmCampaign: text('utm_campaign'),
+    utmContent: text('utm_content'),
+    utmTerm: text('utm_term'),
+
     status: orderStatusEnum('status').notNull().default('draft'),
     providerTransactionId: text('provider_transaction_id'),
     idempotencyKey: text('idempotency_key').notNull(),
@@ -504,6 +589,8 @@ export const orders = pgTable(
     index('orders_event_status_idx').on(t.eventId, t.status),
     index('orders_tenant_idx').on(t.tenantId),
     index('orders_cpf_idx').on(t.eventId, t.compradorCpf),
+    index('orders_canal_idx').on(t.eventId, t.canal),
+    index('orders_utm_idx').on(t.eventId, t.utmSource),
     index('orders_expires_idx').on(t.expiresEm).where(sql`status = 'awaiting_payment'`),
     check('orders_subtotal_ck', sql`${t.subtotalCentavos} >= 0`),
     check('orders_conveniencia_ck', sql`${t.convenienciaCentavos} >= 0`),
@@ -519,6 +606,12 @@ export const orders = pgTable(
       sql`${t.totalCentavos} = ${t.subtotalCentavos} + ${t.convenienciaCentavos} - ${t.descontoCentavos}`,
     ),
     check('orders_parcelas_ck', sql`${t.parcelas} is null or ${t.parcelas} between 1 and 12`),
+    // Venda de PDV não tem transação na PSP; venda online não tem método externo.
+    check(
+      'orders_canal_ck',
+      sql`(${t.canal} = 'online' and ${t.metodoExterno} is null)
+          or (${t.canal} <> 'online' and ${t.providerTransactionId} is null)`,
+    ),
   ],
 );
 
@@ -704,7 +797,22 @@ export const refunds = pgTable(
     orderId: uuid('order_id')
       .notNull()
       .references(() => orders.id, { onDelete: 'restrict' }),
+    /**
+     * Reembolso por INGRESSO, não só por pedido — benchmark, seção 2.2.
+     * Nulo = reembolso do pedido inteiro. É onde discordamos da Sympla: quem
+     * compra 4 e precisa devolver 1 não pode ficar preso.
+     */
+    ticketId: uuid('ticket_id').references((): AnyPgColumn => tickets.id, {
+      onDelete: 'set null',
+    }),
     motivo: refundReasonEnum('motivo').notNull(),
+    /**
+     * Enquadramento do reembolso. Decide se a comissão do operador volta
+     * junto — benchmark, seção 2.3.
+     */
+    tipo: refundTypeEnum('tipo').notNull().default('politica_evento'),
+    /** True na desistência dentro dos 7 dias: devolve 100%, taxa incluída. */
+    incluiConveniencia: boolean('inclui_conveniencia').notNull().default(false),
     observacao: text('observacao'),
     valorCentavos: cents('valor_centavos').notNull(),
     status: refundStatusEnum('status').notNull().default('requested'),
@@ -719,6 +827,7 @@ export const refunds = pgTable(
   (t) => [
     uniqueIndex('refunds_idempotency_key').on(t.idempotencyKey),
     index('refunds_order_idx').on(t.orderId),
+    index('refunds_ticket_idx').on(t.ticketId),
     index('refunds_status_idx').on(t.status),
     check('refunds_valor_ck', sql`${t.valorCentavos} > 0`),
   ],
@@ -834,6 +943,155 @@ export const auditLog = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Acesso do comprador — benchmark, seção 3
+// ---------------------------------------------------------------------------
+
+/**
+ * Link mágico. O comprador NUNCA cria senha: compra sem conta e depois acessa
+ * os ingressos por token enviado ao e-mail da compra.
+ *
+ * Sem `tenant_id` de propósito: o mesmo e-mail compra de vários produtores, e
+ * a área do comprador mostra tudo. A tabela é lida só pela role de serviço.
+ */
+export const buyerAccessTokens = pgTable(
+  'buyer_access_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: text('email').notNull(),
+    /** SHA-256 do token do link. O token cru só existe dentro do e-mail. */
+    tokenHash: text('token_hash').notNull(),
+    expiraEm: timestamp('expira_em', { withTimezone: true }).notNull(),
+    /** Uso único: preenchido na primeira troca por sessão. */
+    usadoEm: timestamp('usado_em', { withTimezone: true }),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('buyer_access_tokens_hash_key').on(t.tokenHash),
+    index('buyer_access_tokens_email_idx').on(sql`lower(${t.email})`),
+    index('buyer_access_tokens_expira_idx').on(t.expiraEm).where(sql`usado_em is null`),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Rateio entre sócios do evento
+// ---------------------------------------------------------------------------
+
+/**
+ * O contrato `PaymentProvider` aceita N recebedores por transação, não apenas
+ * dois. Isso permite dividir automaticamente entre a casa, o produtor parceiro
+ * e o artista, na hora da venda — sem ninguém precisar confiar em ninguém para
+ * repassar depois. É argumento comercial forte, e o mercado não faz bem.
+ *
+ * A soma dos `participacaoBps` das linhas ativas de um evento deve dar 10000.
+ * Validado na aplicação: o Postgres não checa invariante entre linhas.
+ */
+export const eventSplits = pgTable(
+  'event_splits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    nome: text('nome').notNull(),
+    providerRecipientId: text('provider_recipient_id').notNull(),
+    /** Fatia da parcela do produtor, em basis points. */
+    participacaoBps: bps('participacao_bps').notNull(),
+    /** Quem arca com chargeback e reembolso desta fatia. */
+    arcaComEstorno: boolean('arca_com_estorno').notNull().default(true),
+    ordem: integer('ordem').notNull().default(0),
+    ativo: boolean('ativo').notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex('event_splits_event_recipient_key').on(t.eventId, t.providerRecipientId),
+    index('event_splits_tenant_idx').on(t.tenantId),
+    check('event_splits_participacao_ck', sql`${t.participacaoBps} between 0 and 10000`),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Lista de convidados
+// ---------------------------------------------------------------------------
+
+/**
+ * Em casa noturna a lista VIP é parte do negócio: o promoter coloca nomes, a
+ * pessoa chega e entra. Sem isso no sistema, a lista continua no papel ou no
+ * WhatsApp — e o controle de portaria falha exatamente onde mais importa.
+ */
+export const guestLists = pgTable(
+  'guest_lists',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    nome: text('nome').notNull(),
+    promoterNome: text('promoter_nome'),
+    promoterUserId: uuid('promoter_user_id').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
+    /** Teto de nomes. A lista não pode furar a capacidade do evento. */
+    cota: integer('cota').notNull(),
+    /** Tipo de ingresso emitido na entrada. */
+    ticketTypeId: uuid('ticket_type_id').references((): AnyPgColumn => ticketTypes.id, {
+      onDelete: 'set null',
+    }),
+    /** Depois deste horário a lista não vale mais. */
+    validoAte: timestamp('valido_ate', { withTimezone: true }),
+    ativo: boolean('ativo').notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [
+    index('guest_lists_event_idx').on(t.eventId),
+    index('guest_lists_tenant_idx').on(t.tenantId),
+    check('guest_lists_cota_ck', sql`${t.cota} >= 0`),
+  ],
+);
+
+export const guestListEntries = pgTable(
+  'guest_list_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    guestListId: uuid('guest_list_id')
+      .notNull()
+      .references(() => guestLists.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    nome: text('nome').notNull(),
+    cpf: text('cpf'),
+    telefone: text('telefone'),
+    tipo: guestEntryTypeEnum('tipo').notNull().default('cortesia'),
+    /** Ingresso emitido quando a pessoa chega. Nulo até a entrada. */
+    ticketId: uuid('ticket_id').references((): AnyPgColumn => tickets.id, {
+      onDelete: 'set null',
+    }),
+    usadoEm: timestamp('usado_em', { withTimezone: true }),
+    checkedInBy: uuid('checked_in_by').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
+    ...timestamps,
+  },
+  (t) => [
+    index('guest_list_entries_lista_idx').on(t.guestListId),
+    index('guest_list_entries_event_idx').on(t.eventId),
+    // Busca por nome na porta é o caso de uso principal desta tabela.
+    index('guest_list_entries_nome_idx').on(t.eventId, sql`lower(${t.nome})`),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Tipos inferidos
 // ---------------------------------------------------------------------------
 
@@ -861,6 +1119,10 @@ export type Chargeback = typeof chargebacks.$inferSelect;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
+export type BuyerAccessToken = typeof buyerAccessTokens.$inferSelect;
+export type EventSplit = typeof eventSplits.$inferSelect;
+export type GuestList = typeof guestLists.$inferSelect;
+export type GuestListEntry = typeof guestListEntries.$inferSelect;
 
 /** Tabelas sujeitas a RLS por tenant. Usado pelo teste de isolamento. */
 export const TENANT_SCOPED_TABLES = [
@@ -876,4 +1138,7 @@ export const TENANT_SCOPED_TABLES = [
   'refunds',
   'chargebacks',
   'memberships',
+  'event_splits',
+  'guest_lists',
+  'guest_list_entries',
 ] as const;

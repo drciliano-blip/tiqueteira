@@ -1,0 +1,264 @@
+/**
+ * Consultas da loja pública.
+ *
+ * A vitrine não tem sessão, então não existe `app.tenant_id` vindo de um
+ * login. O tenant é descoberto pelo slug da URL — e aí mora o único ponto
+ * delicado deste arquivo:
+ *
+ *   Para achar o tenant pelo slug seria preciso ler a tabela `tenants`, mas a
+ *   política de RLS dessa tabela exige justamente o `app.tenant_id` que ainda
+ *   não temos. Galinha e ovo.
+ *
+ * A saída é uma única consulta pela conexão de serviço, restrita a três
+ * colunas públicas (`id`, `slug`, `nome`) de tenants ativos. Nada de taxa,
+ * CNPJ ou dado de recebedor passa por aqui. A partir do `id` resolvido, todo
+ * o resto usa `withTenant()` e volta a ser protegido pelo RLS.
+ */
+import 'server-only';
+
+import { and, asc, eq, gt, inArray } from 'drizzle-orm';
+
+import { serviceDb, withTenant } from '@/db/client';
+import { events, tenants, ticketTypes, venues } from '@/db/schema';
+import { disponivel } from '@/domain/inventory';
+
+export type TenantPublico = { id: string; slug: string; nome: string };
+
+/** Estados em que um evento aparece na vitrine. */
+const VISIVEIS = ['publicado', 'esgotado'] as const;
+
+export async function resolverTenantPorSlug(slug: string): Promise<TenantPublico | null> {
+  const [linha] = await serviceDb()
+    .select({ id: tenants.id, slug: tenants.slug, nome: tenants.nome })
+    .from(tenants)
+    .where(and(eq(tenants.slug, slug), eq(tenants.status, 'ativo')))
+    .limit(1);
+
+  return linha ?? null;
+}
+
+/** Vitrine: produtores ativos que têm ao menos um evento à venda. */
+export async function listarProdutores(): Promise<TenantPublico[]> {
+  return serviceDb()
+    .selectDistinct({ id: tenants.id, slug: tenants.slug, nome: tenants.nome })
+    .from(tenants)
+    .innerJoin(events, eq(events.tenantId, tenants.id))
+    .where(
+      and(
+        eq(tenants.status, 'ativo'),
+        inArray(events.status, [...VISIVEIS]),
+        gt(events.dataFim, new Date()),
+      ),
+    )
+    .orderBy(asc(tenants.nome));
+}
+
+export type EventoResumo = {
+  id: string;
+  slug: string;
+  titulo: string;
+  imagemUrl: string | null;
+  dataInicio: Date;
+  status: string;
+  venueNome: string;
+  cidade: string | null;
+  /** Menor preço entre os lotes à venda. `null` se nada disponível. */
+  precoMinimoCentavos: number | null;
+};
+
+export async function listarEventosDoTenant(tenantId: string): Promise<EventoResumo[]> {
+  return withTenant(tenantId, async (tx) => {
+    const linhas = await tx
+      .select({
+        id: events.id,
+        slug: events.slug,
+        titulo: events.titulo,
+        imagemUrl: events.imagemUrl,
+        dataInicio: events.dataInicio,
+        status: events.status,
+        venueNome: venues.nome,
+        cidade: venues.cidade,
+      })
+      .from(events)
+      .innerJoin(venues, eq(venues.id, events.venueId))
+      .where(and(inArray(events.status, [...VISIVEIS]), gt(events.dataFim, new Date())))
+      .orderBy(asc(events.dataInicio));
+
+    if (linhas.length === 0) return [];
+
+    const lotes = await tx
+      .select({
+        eventId: ticketTypes.eventId,
+        precoCentavos: ticketTypes.precoCentavos,
+        ativo: ticketTypes.ativo,
+        quantidadeTotal: ticketTypes.quantidadeTotal,
+        quantidadeVendida: ticketTypes.quantidadeVendida,
+        quantidadeReservada: ticketTypes.quantidadeReservada,
+      })
+      .from(ticketTypes)
+      .where(
+        inArray(
+          ticketTypes.eventId,
+          linhas.map((l) => l.id),
+        ),
+      );
+
+    const minimoPorEvento = new Map<string, number>();
+    for (const lote of lotes) {
+      if (!lote.ativo || disponivel(lote) <= 0) continue;
+      const atual = minimoPorEvento.get(lote.eventId);
+      if (atual === undefined || lote.precoCentavos < atual) {
+        minimoPorEvento.set(lote.eventId, lote.precoCentavos);
+      }
+    }
+
+    return linhas.map((l) => ({
+      ...l,
+      precoMinimoCentavos: minimoPorEvento.get(l.id) ?? null,
+    }));
+  });
+}
+
+export type LotePublico = {
+  id: string;
+  nome: string;
+  descricao: string | null;
+  precoCentavos: number;
+  tipo: string;
+  exigeDocumento: boolean;
+  limitePorPedido: number;
+  vendasInicio: Date;
+  vendasFim: Date;
+  ativo: boolean;
+  disponivel: number;
+  /** Regra de exibição: por que este lote não pode ser comprado agora. */
+  situacao: 'a_venda' | 'esgotado' | 'em_breve' | 'encerrado' | 'inativo';
+};
+
+export type EventoPublico = {
+  id: string;
+  slug: string;
+  titulo: string;
+  descricao: string | null;
+  imagemUrl: string | null;
+  dataInicio: Date;
+  dataFim: Date;
+  classificacaoEtaria: number;
+  status: string;
+  ingressoNominal: boolean;
+  exigeDocumentoEntrada: boolean;
+  politicaReembolso: string | null;
+  venue: { nome: string; endereco: string | null; cidade: string | null; uf: string | null };
+  lotes: LotePublico[];
+};
+
+function situacaoDoLote(
+  lote: { ativo: boolean; vendasInicio: Date; vendasFim: Date } & {
+    quantidadeTotal: number;
+    quantidadeVendida: number;
+    quantidadeReservada: number;
+  },
+  agora: Date,
+): LotePublico['situacao'] {
+  if (!lote.ativo) return 'inativo';
+  if (agora < lote.vendasInicio) return 'em_breve';
+  if (agora > lote.vendasFim) return 'encerrado';
+  if (disponivel(lote) <= 0) return 'esgotado';
+  return 'a_venda';
+}
+
+export async function buscarEventoPublico(
+  tenantId: string,
+  eventSlug: string,
+): Promise<EventoPublico | null> {
+  return withTenant(tenantId, async (tx) => {
+    const [evento] = await tx
+      .select({
+        id: events.id,
+        slug: events.slug,
+        titulo: events.titulo,
+        descricao: events.descricao,
+        imagemUrl: events.imagemUrl,
+        dataInicio: events.dataInicio,
+        dataFim: events.dataFim,
+        classificacaoEtaria: events.classificacaoEtaria,
+        status: events.status,
+        ingressoNominal: events.ingressoNominal,
+        exigeDocumentoEntrada: events.exigeDocumentoEntrada,
+        politicaReembolso: events.politicaReembolso,
+        venueNome: venues.nome,
+        venueEndereco: venues.endereco,
+        venueCidade: venues.cidade,
+        venueUf: venues.uf,
+      })
+      .from(events)
+      .innerJoin(venues, eq(venues.id, events.venueId))
+      .where(and(eq(events.slug, eventSlug), inArray(events.status, [...VISIVEIS])))
+      .limit(1);
+
+    if (!evento) return null;
+
+    const linhas = await tx
+      .select({
+        id: ticketTypes.id,
+        nome: ticketTypes.nome,
+        descricao: ticketTypes.descricao,
+        precoCentavos: ticketTypes.precoCentavos,
+        tipo: ticketTypes.tipo,
+        exigeDocumento: ticketTypes.exigeDocumento,
+        limitePorPedido: ticketTypes.limitePorPedido,
+        vendasInicio: ticketTypes.vendasInicio,
+        vendasFim: ticketTypes.vendasFim,
+        ativo: ticketTypes.ativo,
+        ordem: ticketTypes.ordem,
+        quantidadeTotal: ticketTypes.quantidadeTotal,
+        quantidadeVendida: ticketTypes.quantidadeVendida,
+        quantidadeReservada: ticketTypes.quantidadeReservada,
+      })
+      .from(ticketTypes)
+      .where(eq(ticketTypes.eventId, evento.id))
+      .orderBy(asc(ticketTypes.ordem), asc(ticketTypes.precoCentavos));
+
+    const agora = new Date();
+
+    const lotes: LotePublico[] = linhas
+      // Lote inativo de lote anterior não interessa ao comprador.
+      .filter((l) => l.ativo || disponivel(l) > 0)
+      .map((l) => ({
+        id: l.id,
+        nome: l.nome,
+        descricao: l.descricao,
+        precoCentavos: l.precoCentavos,
+        tipo: l.tipo,
+        exigeDocumento: l.exigeDocumento,
+        limitePorPedido: l.limitePorPedido,
+        vendasInicio: l.vendasInicio,
+        vendasFim: l.vendasFim,
+        ativo: l.ativo,
+        disponivel: disponivel(l),
+        situacao: situacaoDoLote(l, agora),
+      }));
+
+    return {
+      id: evento.id,
+      slug: evento.slug,
+      titulo: evento.titulo,
+      descricao: evento.descricao,
+      imagemUrl: evento.imagemUrl,
+      dataInicio: evento.dataInicio,
+      dataFim: evento.dataFim,
+      classificacaoEtaria: evento.classificacaoEtaria,
+      status: evento.status,
+      ingressoNominal: evento.ingressoNominal,
+      exigeDocumentoEntrada: evento.exigeDocumentoEntrada,
+      politicaReembolso: evento.politicaReembolso,
+      venue: {
+        nome: evento.venueNome,
+        endereco: evento.venueEndereco,
+        cidade: evento.venueCidade,
+        uf: evento.venueUf,
+      },
+      lotes,
+    };
+  });
+}
