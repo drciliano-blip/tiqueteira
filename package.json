@@ -20,11 +20,13 @@
     "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.0",
     "drizzle-orm": "^0.45.2",
     "next": "16.3.4",
     "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
     "zod": "^4.5.4"
   },
   "devDependencies": {
