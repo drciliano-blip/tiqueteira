@@ -18,13 +18,14 @@ paralelo e nenhum ganho real.
 
 **Ação sua:** apagar o projeto `tiqueteira2`, que não está em uso.
 
-### 2. Staging na Vercel — 15 minutos
-**Por quê:** último item do *Definition of Done* da Fase 0. Com ele, cada push
-vira um link que você abre e vê funcionando, em vez de depender da minha
-palavra de que está tudo certo.
+### 2. ~~Staging na Vercel~~ — feito em 2026-09-07
+No ar em **https://tiqueteira.vercel.app**, com as 12 variáveis de ambiente
+configuradas nos três ambientes. Todo push na `main` gera deploy automático.
 
-**Como:** entrar na Vercel, *Add New → Project*, importar o repositório
-`drciliano-blip/tiqueteira`, e me avisar — as variáveis de ambiente eu passo.
+Aprendizado operacional: preencher variável de ambiente pelo formulário da
+Vercel não escala e erra fácil. O caminho é a CLI — `vercel login` uma vez, e
+daí em diante tudo por comando. Vale o mesmo para qualquer painel: se existe
+CLI, use a CLI.
 
 ---
 
