@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import { Marca } from '@/components/marca';
 import { serviceDb } from '@/db/client';
 import { tenants } from '@/db/schema';
 import { eventosDoTenant, resumoDoTenant } from '@/lib/painel-queries';
@@ -62,27 +61,6 @@ export default async function Painel() {
   ]);
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="border-b border-line">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4">
-          <Marca />
-          <span className="text-sm text-faint">/</span>
-          <span className="truncate text-sm font-medium">{tenant.nome}</span>
-
-          <div className="ml-auto flex items-center gap-3">
-            <Link
-              href={`/${tenant.slug}`}
-              className="text-sm text-muted transition hover:text-txt"
-            >
-              Ver vitrine
-            </Link>
-            <form action={sair}>
-              <button className="text-sm text-muted transition hover:text-txt">Sair</button>
-            </form>
-          </div>
-        </div>
-      </header>
-
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h1 className="font-titulo text-xl font-bold">Visão geral</h1>
@@ -210,7 +188,6 @@ export default async function Painel() {
           )}
         </section>
       </main>
-    </div>
   );
 }
 

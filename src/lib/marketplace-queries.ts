@@ -16,23 +16,12 @@ import { and, asc, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
 
 import { serviceDb } from '@/db/client';
 import { events, orders, tenants, ticketTypes, venues } from '@/db/schema';
+import { CATEGORIAS, type Categoria } from '@/domain/categorias';
+
+export { CATEGORIAS };
+export type { Categoria };
 
 const VISIVEIS = ['publicado', 'esgotado'] as const;
-
-/** Rótulos das categorias, para menu e filtro. */
-export const CATEGORIAS = [
-  { valor: 'festa', rotulo: 'Festas' },
-  { valor: 'show', rotulo: 'Shows' },
-  { valor: 'teatro', rotulo: 'Teatro' },
-  { valor: 'stand_up', rotulo: 'Stand-up' },
-  { valor: 'esporte', rotulo: 'Esporte' },
-  { valor: 'gastronomia', rotulo: 'Gastronomia' },
-  { valor: 'curso', rotulo: 'Cursos' },
-  { valor: 'infantil', rotulo: 'Infantil' },
-  { valor: 'outro', rotulo: 'Outros' },
-] as const;
-
-export type Categoria = (typeof CATEGORIAS)[number]['valor'];
 
 export type EventoVitrine = {
   id: string;
