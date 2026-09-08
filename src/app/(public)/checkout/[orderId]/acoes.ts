@@ -8,6 +8,7 @@ import { serviceDb } from '@/db/client';
 import { orderItems, orders, tenants } from '@/db/schema';
 import { cpfValido, normalizarCpf } from '@/domain/cpf';
 import { montarSplits, type FeeBreakdown } from '@/lib/fees';
+import { OPERADOR } from '@/lib/operador';
 import { getPaymentProvider } from '@/lib/payments/provider';
 import type { SplitRule } from '@/lib/payments/types';
 
@@ -141,7 +142,7 @@ export async function pagarComPix(
       },
       splits,
       pixExpiresInSeconds: 600,
-      statementDescriptor: 'INGRESSOS',
+      statementDescriptor: OPERADOR.descritorFatura,
       metadata: { unidades: String(itens?.unidades ?? 0) },
     });
 

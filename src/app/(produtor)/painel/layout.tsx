@@ -49,6 +49,7 @@ export default async function LayoutPainel({ children }: { children: ReactNode }
         <nav className="mx-auto flex max-w-6xl gap-1 px-3 pb-2">
           {[
             { href: '/painel', rotulo: 'Visão geral' },
+            { href: '/painel/vendas', rotulo: 'Vendas' },
             { href: '/painel/eventos/novo', rotulo: 'Novo evento' },
             { href: '/painel/espacos', rotulo: 'Espaços' },
           ].map((item) => (
