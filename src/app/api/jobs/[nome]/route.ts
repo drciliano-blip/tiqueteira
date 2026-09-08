@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { concluirJob, falharJob, reservarJobs, type NomeJob } from '@/lib/jobs';
 import { reembolsarPedidosDoEvento, type PayloadCancelamento } from '@/jobs/cancelar-evento';
 import { enviarIngressos, type PayloadEnvio } from '@/jobs/enviar-ingressos';
+import { conciliarPedidos } from '@/jobs/conciliacao';
 import { reembolsarPagamentosAtrasados } from '@/jobs/reembolso-atrasado';
 import { devolverPedidosExpirados } from '@/jobs/expirar-reservas';
 import { env } from '@/lib/env';
@@ -23,6 +24,7 @@ const NOMES: NomeJob[] = [
   'expirar-reservas',
   'reembolso-automatico',
   'pagamento-atrasado',
+  'conciliacao',
 ];
 
 /** Comparação em tempo constante: `===` vaza o prefixo acertado pelo tempo. */
@@ -64,6 +66,14 @@ export async function POST(
   if (nome === 'pagamento-atrasado') {
     const detalhe = await reembolsarPagamentosAtrasados();
     return NextResponse.json({ detalhe });
+  }
+
+  if (nome === 'conciliacao') {
+    const relatorio = await conciliarPedidos();
+    if (relatorio.divergencias.length > 0) {
+      console.error('[conciliacao] divergências', relatorio.divergencias);
+    }
+    return NextResponse.json(relatorio);
   }
 
   const pendentes = await reservarJobs(nome as NomeJob);

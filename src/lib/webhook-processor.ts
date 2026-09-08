@@ -41,6 +41,19 @@ export type Dependencias = {
   ticketSecret: string;
 };
 
+/**
+ * De onde o evento veio.
+ *
+ * `webhook` é entrega externa e passa pela verificação de assinatura.
+ * `conciliacao` é o nosso próprio job, depois de PERGUNTAR à PSP pelo canal
+ * autenticado dela — a autenticação já aconteceu na chamada de API, e exigir
+ * assinatura aqui obrigaria a forjar uma, que é pior.
+ *
+ * A origem é gravada em `webhook_events.provider`, então a diferença fica
+ * visível na auditoria em vez de escondida no código.
+ */
+export type Origem = 'webhook' | 'conciliacao';
+
 export async function processarWebhook(
   rawBody: string,
   headers: Record<string, string>,
@@ -125,6 +138,54 @@ export async function processarWebhook(
     // é apagada, deixando a próxima entrega tentar de novo do zero.
     await db.delete(webhookEvents).where(eq(webhookEvents.id, registroId));
 
+    return { status: 500, detalhe: mensagem };
+  }
+}
+
+/**
+ * Processa um evento que já chegou verificado por outro caminho.
+ *
+ * Existe para a conciliação: o job pergunta à PSP pelo canal autenticado e
+ * traz a resposta. Ainda assim o evento passa pela MESMA idempotência e pela
+ * MESMA máquina de estado do webhook — não há atalho que confirme pagamento
+ * sem passar por aqui.
+ */
+export async function processarEventoConfiavel(
+  evento: NormalizedWebhookEvent,
+  deps: Dependencias,
+): Promise<ResultadoWebhook> {
+  const db = deps.db ?? serviceDb();
+
+  const inserido = await db
+    .insert(webhookEvents)
+    .values({
+      // Marca a origem: na auditoria, evento de conciliação não se confunde
+      // com entrega da operadora.
+      provider: `${deps.provider.name}:conciliacao`,
+      providerEventId: evento.providerEventId,
+      tipo: evento.type,
+      payloadRaw: JSON.stringify(evento.raw ?? {}).slice(0, 20_000),
+      assinaturaValida: true,
+    })
+    .onConflictDoNothing()
+    .returning({ id: webhookEvents.id });
+
+  if (inserido.length === 0) {
+    return { status: 200, detalhe: 'evento já processado' };
+  }
+
+  const registroId = inserido[0]!.id;
+
+  try {
+    const detalhe = await processarEvento(db, evento, deps.ticketSecret);
+    await db
+      .update(webhookEvents)
+      .set({ processadoEm: new Date() })
+      .where(eq(webhookEvents.id, registroId));
+    return { status: 200, detalhe };
+  } catch (erro) {
+    const mensagem = erro instanceof Error ? erro.message : String(erro);
+    await db.delete(webhookEvents).where(eq(webhookEvents.id, registroId));
     return { status: 500, detalhe: mensagem };
   }
 }

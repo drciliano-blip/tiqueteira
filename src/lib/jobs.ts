@@ -21,7 +21,8 @@ export type NomeJob =
   | 'enviar-ingressos'
   | 'expirar-reservas'
   | 'reembolso-automatico'
-  | 'pagamento-atrasado';
+  | 'pagamento-atrasado'
+  | 'conciliacao';
 
 export type EnfileirarInput = {
   nome: NomeJob;

@@ -16,6 +16,10 @@
     {
       "path": "/api/jobs/pagamento-atrasado",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/jobs/conciliacao",
+      "schedule": "17 * * * *"
     }
   ]
 }
