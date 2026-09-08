@@ -1,24 +1,40 @@
 'use client';
 
-import { useCallback, useEffect, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
 import { ScannerQr } from '@/components/scanner-qr';
-import { mascararCpf } from '@/domain/cpf';
-import type { ContadorPortaria, LinhaBusca, ResultadoCheckin } from '@/lib/checkin';
+import type { ContadorPortaria, ResultadoCheckin } from '@/lib/checkin';
+import {
+  baixarManifesto,
+  buscarNoManifesto,
+  filaPendente,
+  indexar,
+  manifestoGuardado,
+  sincronizar,
+  validarLocalmente,
+  type IngressoManifesto,
+  type Manifesto,
+} from '@/lib/portaria-offline';
 import { buscar, contador, liberarManualmente, lerQr, marcarDocumento } from './acoes';
 
 /**
- * Tela de portaria — benchmark, seção 5.6.
+ * Tela de portaria — benchmark, seção 5.6, e plano, seção 24.
  *
- * Câmera ocupando quase tudo e resultado em bloco de cor cheia: verde entra,
- * vermelho não entra, âmbar exige conferência de documento. Fonte grande.
+ * Câmera ocupando quase tudo, resultado em bloco de cor cheia, sem menu.
+ * O projeto assume as condições reais: escuro, barulho, fila atrás, operador
+ * com uma mão só, e rede que cai justamente quando a casa enche.
  *
- * O projeto assume as condições reais da porta: escuro, barulho, fila atrás,
- * operador com uma mão só. Por isso não há menu, o resultado é lido de longe,
- * e o botão de busca manual fica ao alcance do polegar.
+ * **Funciona sem rede.** O aparelho baixa o manifesto ao abrir e valida no
+ * local. Quando há rede, quem decide é o servidor — só ele enxerga o que os
+ * outros portões fizeram. Sem rede, a validação local segura a operação e a
+ * entrada entra numa fila que sobe depois.
  */
 
 type Modo = 'scanner' | 'busca';
+
+type LinhaBuscaLocal = IngressoManifesto & { id?: string };
+
+type Resultado = ResultadoCheckin | { situacao: 'desconhecido' };
 
 const CORES: Record<string, string> = {
   liberado: 'bg-sucesso text-black',
@@ -27,14 +43,16 @@ const CORES: Record<string, string> = {
   cancelado: 'bg-perigo text-white',
   outro_evento: 'bg-perigo text-white',
   invalido: 'bg-perigo text-white',
+  desconhecido: 'bg-alerta text-black',
 };
 
-function hora(d: Date): string {
+function hora(d: Date | string): string {
+  const data = typeof d === 'string' ? new Date(d) : d;
   return new Intl.DateTimeFormat('pt-BR', {
     hour: '2-digit',
     minute: '2-digit',
     timeZone: 'America/Sao_Paulo',
-  }).format(d);
+  }).format(data);
 }
 
 export function PainelPortaria({
@@ -47,35 +65,166 @@ export function PainelPortaria({
   inicial: ContadorPortaria;
 }) {
   const [modo, setModo] = useState<Modo>('scanner');
-  const [resultado, setResultado] = useState<ResultadoCheckin | null>(null);
+  const [resultado, setResultado] = useState<Resultado | null>(null);
+  const [aguardandoDocumento, setAguardandoDocumento] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [numeros, setNumeros] = useState(inicial);
   const [processando, iniciar] = useTransition();
 
   const [termo, setTermo] = useState('');
-  const [achados, setAchados] = useState<LinhaBusca[]>([]);
-  const [buscando, iniciarBusca] = useTransition();
+  const [achados, setAchados] = useState<LinhaBuscaLocal[]>([]);
+
+  const [manifesto, setManifesto] = useState<Manifesto | null>(null);
+  /**
+   * Idade da lista em estado, não calculada na renderização: ler o relógio
+   * durante o render deixa o resultado instável entre um desenho e outro.
+   */
+  const [idadeDoManifesto, setIdadeDoManifesto] = useState<number | null>(null);
+  const [baixando, setBaixando] = useState(false);
+  const [online, setOnline] = useState(true);
+  const [pendentes, setPendentes] = useState(0);
+
+  const indice = useMemo(
+    () => (manifesto ? indexar(manifesto) : new Map<string, IngressoManifesto>()),
+    [manifesto],
+  );
+  const ultimoToken = useRef('');
 
   /**
-   * Estado, não ref: o bloco de resultado depende disto para decidir se some
-   * ao toque. Ref lido durante a renderização não faz o React redesenhar.
+   * Lista guardada entra primeiro, para a portaria já abrir funcionando; a
+   * versão atualizada vem em seguida.
+   *
+   * Tudo assíncrono de propósito: `localStorage` e `navigator.onLine` só
+   * existem no navegador, e lê-los durante a renderização quebraria a
+   * hidratação — o servidor não tem nem um nem outro.
    */
-  const [aguardandoDocumento, setAguardandoDocumento] = useState(false);
-
-  /** Contador ao vivo, sem pesar: uma consulta a cada 20 segundos. */
   useEffect(() => {
-    const id = setInterval(() => {
-      void contador(eventId).then(setNumeros).catch(() => undefined);
-    }, 20_000);
+    let ativo = true;
+
+    void (async () => {
+      const guardado = manifestoGuardado(eventId);
+      if (!ativo) return;
+
+      if (guardado) setManifesto(guardado);
+      setPendentes(filaPendente(eventId).length);
+      setOnline(navigator.onLine);
+
+      const atualizado = await baixarManifesto(eventId);
+      if (ativo && atualizado) setManifesto(atualizado);
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [eventId]);
+
+  useEffect(() => {
+    if (!manifesto) return;
+
+    const geradoEm = new Date(manifesto.geradoEm).getTime();
+    const atualizar = () =>
+      setIdadeDoManifesto(Math.round((Date.now() - geradoEm) / 60_000));
+
+    // Primeira medida no próximo tique, não no corpo do efeito: medir o
+    // relógio durante a renderização torna o resultado instável.
+    const inicial = setTimeout(atualizar, 0);
+    const id = setInterval(atualizar, 30_000);
+
+    return () => {
+      clearTimeout(inicial);
+      clearInterval(id);
+    };
+  }, [manifesto]);
+
+  useEffect(() => {
+    const mudou = () => setOnline(navigator.onLine);
+    window.addEventListener('online', mudou);
+    window.addEventListener('offline', mudou);
+    return () => {
+      window.removeEventListener('online', mudou);
+      window.removeEventListener('offline', mudou);
+    };
+  }, []);
+
+  /** Sobe a fila e atualiza o contador sempre que houver rede. */
+  useEffect(() => {
+    const rodar = async () => {
+      if (!navigator.onLine) return;
+
+      const r = await sincronizar(eventId);
+      if (r.enviadas > 0) setPendentes(filaPendente(eventId).length);
+
+      try {
+        setNumeros(await contador(eventId));
+      } catch {
+        // Rede caiu no meio. O próximo ciclo tenta de novo.
+      }
+    };
+
+    void rodar();
+    const id = setInterval(() => void rodar(), 20_000);
     return () => clearInterval(id);
   }, [eventId]);
 
+  const mostrar = useCallback((r: Resultado, pedeDocumento: boolean) => {
+    setResultado(r);
+    setAguardandoDocumento(pedeDocumento);
+    // O que não exige ação some sozinho: a fila não espera.
+    if (!pedeDocumento) setTimeout(() => setResultado(null), 2500);
+  }, []);
+
   const processar = useCallback(
     (token: string) => {
+      ultimoToken.current = token;
+
       iniciar(async () => {
         setErro(null);
-        const r = await lerQr(eventId, token);
 
+        // Sem rede: decide no aparelho. É para isso que o manifesto existe.
+        if (!navigator.onLine) {
+          if (!manifesto) {
+            setErro('Sem rede e sem lista baixada. Conecte uma vez para baixar a lista.');
+            return;
+          }
+
+          const local = await validarLocalmente(eventId, token, manifesto, indice);
+          setPendentes(filaPendente(eventId).length);
+
+          if (local.situacao === 'liberado') {
+            setNumeros((n) => ({ ...n, presentes: n.presentes + 1 }));
+            mostrar(
+              {
+                situacao: 'liberado',
+                ticketId: '',
+                codigo: local.codigo,
+                titular: local.titular,
+                titularCpf: local.cpfParcial,
+                lote: local.lote,
+                exigeDocumento: local.exigeDocumento,
+              },
+              local.exigeDocumento,
+            );
+          } else if (local.situacao === 'duplicado') {
+            mostrar(
+              {
+                situacao: 'duplicado',
+                codigo: local.codigo,
+                titular: local.titular,
+                entrouEm: new Date(local.entrouEm),
+                entrouPor: null,
+              },
+              false,
+            );
+          } else if (local.situacao === 'cancelado') {
+            mostrar({ situacao: 'cancelado', codigo: local.codigo, motivo: null }, false);
+          } else {
+            mostrar({ situacao: 'desconhecido' }, false);
+          }
+          return;
+        }
+
+        // Com rede, o servidor manda: só ele vê os outros portões.
+        const r = await lerQr(eventId, token);
         if (!r.ok) {
           setErro(r.erro);
           return;
@@ -84,44 +233,49 @@ export function PainelPortaria({
         const pedeDocumento =
           r.resultado.situacao === 'liberado' && r.resultado.exigeDocumento;
 
-        setResultado(r.resultado);
-        setAguardandoDocumento(pedeDocumento);
-
         if (r.resultado.situacao === 'liberado') {
           setNumeros((n) => ({ ...n, presentes: n.presentes + 1 }));
         }
 
-        // Resultado que não exige ação some sozinho: a fila não espera.
-        if (!pedeDocumento) {
-          setTimeout(() => setResultado(null), 2500);
-        }
+        mostrar(r.resultado, pedeDocumento);
       });
     },
-    [eventId],
+    [eventId, manifesto, indice, mostrar],
   );
 
+  /** Busca: cai para o manifesto quando não há rede. */
   useEffect(() => {
     if (termo.trim().length < 3) return;
 
-    // Pausa antes de consultar: com fila na porta o operador digita rápido, e
-    // uma consulta por tecla derrubaria a resposta.
     const id = setTimeout(() => {
-      iniciarBusca(async () => {
-        try {
-          setAchados(await buscar(eventId, termo));
-        } catch {
-          setAchados([]);
+      void (async () => {
+        if (!navigator.onLine) {
+          setAchados(manifesto ? buscarNoManifesto(manifesto, termo) : []);
+          return;
         }
-      });
+        try {
+          const linhas = await buscar(eventId, termo);
+          setAchados(
+            linhas.map((t) => ({
+              h: '',
+              c: t.codigo,
+              n: t.titular,
+              d: t.titularCpf ? t.titularCpf.slice(3, 9) : null,
+              l: '',
+              s: t.status,
+              e: t.checkedInEm ? new Date(t.checkedInEm).toISOString() : null,
+              id: t.id,
+            })),
+          );
+        } catch {
+          setAchados(manifesto ? buscarNoManifesto(manifesto, termo) : []);
+        }
+      })();
     }, 300);
 
     return () => clearTimeout(id);
-  }, [termo, eventId]);
+  }, [termo, eventId, manifesto]);
 
-  /**
-   * Lista derivada em vez de limpa por efeito: apagar o campo esconde os
-   * resultados na mesma renderização, sem passar por um ciclo a mais.
-   */
   const visiveis = termo.trim().length >= 3 ? achados : [];
 
   const situacaoVisual =
@@ -132,7 +286,21 @@ export function PainelPortaria({
   return (
     <div className="flex min-h-dvh flex-col bg-black text-white">
       <header className="flex items-center justify-between gap-3 px-4 py-3">
-        <p className="min-w-0 truncate text-sm font-medium">{eventoTitulo}</p>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{eventoTitulo}</p>
+          <p className="flex items-center gap-1.5 text-xs text-white/50">
+            <span
+              aria-hidden
+              className={`h-1.5 w-1.5 rounded-full ${online ? 'bg-sucesso' : 'bg-alerta'}`}
+            />
+            {online ? 'conectado' : 'sem rede'}
+            {idadeDoManifesto !== null && (
+              <> · lista de {idadeDoManifesto < 1 ? 'agora' : `${idadeDoManifesto} min`}</>
+            )}
+            {pendentes > 0 && <> · {pendentes} a sincronizar</>}
+          </p>
+        </div>
+
         <p className="tabular shrink-0 text-sm">
           <span className="font-bold">{numeros.presentes}</span>
           <span className="text-white/50"> / {numeros.emitidos}</span>
@@ -141,7 +309,28 @@ export function PainelPortaria({
 
       <main className="flex-1 px-4 pb-4">
         {modo === 'scanner' ? (
-          <ScannerQr onLeitura={processar} pausado={resultado !== null || processando} />
+          <>
+            <ScannerQr onLeitura={processar} pausado={resultado !== null || processando} />
+
+            {!manifesto && (
+              <button
+                type="button"
+                disabled={baixando}
+                onClick={() => {
+                  setBaixando(true);
+                  void baixarManifesto(eventId)
+                    .then((m) => {
+                      if (m) setManifesto(m);
+                      else setErro('Não consegui baixar a lista.');
+                    })
+                    .finally(() => setBaixando(false));
+                }}
+                className="mt-3 w-full rounded-botao bg-white/10 py-3 text-sm font-medium"
+              >
+                {baixando ? 'Baixando lista…' : 'Baixar lista para funcionar sem rede'}
+              </button>
+            )}
+          </>
         ) : (
           <div className="rounded-cartao bg-white/5 p-4">
             <label htmlFor="busca-portaria" className="text-sm text-white/70">
@@ -156,38 +345,36 @@ export function PainelPortaria({
               className="mt-2 w-full rounded-botao border border-white/20 bg-black px-3 py-3 text-lg text-white placeholder:text-white/30 focus:border-white focus:outline-none"
             />
 
-            {buscando && <p className="mt-3 text-sm text-white/50">Procurando…</p>}
-
             <ul className="mt-3 divide-y divide-white/10">
               {visiveis.map((t) => (
-                <li key={t.id} className="flex items-center gap-3 py-3">
+                <li key={t.c} className="flex items-center gap-3 py-3">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{t.titular}</p>
+                    <p className="truncate font-medium">{t.n}</p>
                     <p className="tabular text-xs text-white/50">
-                      {t.codigo}
-                      {t.titularCpf ? ` · ${mascararCpf(t.titularCpf)}` : ''}
-                      {t.checkedInEm ? ` · entrou ${hora(new Date(t.checkedInEm))}` : ''}
+                      {t.c}
+                      {t.d ? ` · ***${t.d}**` : ''}
+                      {t.e ? ` · entrou ${hora(t.e)}` : ''}
                     </p>
                   </div>
 
-                  {t.status === 'valido' ? (
+                  {t.s === 'valido' && t.id ? (
                     <button
                       type="button"
                       disabled={processando}
                       onClick={() =>
                         iniciar(async () => {
-                          const r = await liberarManualmente(eventId, t.id);
+                          const r = await liberarManualmente(eventId, t.id!);
                           if (r.ok) {
-                            setResultado(r.resultado);
                             if (r.resultado.situacao === 'liberado') {
                               setNumeros((n) => ({ ...n, presentes: n.presentes + 1 }));
-                              setAguardandoDocumento(r.resultado.exigeDocumento);
-                              if (!r.resultado.exigeDocumento) {
-                                setTimeout(() => setResultado(null), 2500);
-                              }
+                              mostrar(r.resultado, r.resultado.exigeDocumento);
+                            } else {
+                              mostrar(r.resultado, false);
                             }
                             setTermo('');
-                          } else setErro(r.erro);
+                          } else {
+                            setErro(r.erro);
+                          }
                         })
                       }
                       className="shrink-0 rounded-botao bg-sucesso px-4 py-2 text-sm font-semibold text-black"
@@ -196,13 +383,13 @@ export function PainelPortaria({
                     </button>
                   ) : (
                     <span className="shrink-0 text-xs uppercase text-white/40">
-                      {t.status}
+                      {t.s === 'valido' ? 'leia o QR' : t.s}
                     </span>
                   )}
                 </li>
               ))}
 
-              {termo.trim().length >= 3 && !buscando && visiveis.length === 0 && (
+              {termo.trim().length >= 3 && visiveis.length === 0 && (
                 <li className="py-6 text-center text-sm text-white/50">
                   Ninguém com esse nome neste evento.
                 </li>
@@ -218,7 +405,6 @@ export function PainelPortaria({
         )}
       </main>
 
-      {/* Alternância ao alcance do polegar, no rodapé. */}
       <nav className="grid grid-cols-2 gap-2 border-t border-white/10 p-3">
         <button
           type="button"
@@ -240,7 +426,6 @@ export function PainelPortaria({
         </button>
       </nav>
 
-      {/* Resultado em bloco de cor cheia, legível a dois metros de distância. */}
       {resultado && (
         <div
           role="status"
@@ -259,7 +444,7 @@ export function PainelPortaria({
               </p>
               <p className="mt-4 text-2xl font-bold">{resultado.titular}</p>
               {resultado.titularCpf && (
-                <p className="tabular mt-1 text-lg">{mascararCpf(resultado.titularCpf)}</p>
+                <p className="tabular mt-1 text-lg">***{resultado.titularCpf}**</p>
               )}
               <p className="mt-2 text-base opacity-80">
                 {resultado.lote} · {resultado.codigo}
@@ -271,7 +456,9 @@ export function PainelPortaria({
                     type="button"
                     onClick={() => {
                       setAguardandoDocumento(false);
-                      void marcarDocumento(eventId, resultado.ticketId);
+                      if (resultado.ticketId) {
+                        void marcarDocumento(eventId, resultado.ticketId);
+                      }
                       setResultado(null);
                     }}
                     className="rounded-botao bg-black py-4 text-lg font-bold text-white"
@@ -298,7 +485,7 @@ export function PainelPortaria({
               <p className="text-4xl font-black uppercase">Já entrou</p>
               <p className="mt-4 text-2xl font-bold">{resultado.titular}</p>
               <p className="mt-3 text-lg">
-                Entrada às {hora(new Date(resultado.entrouEm))}
+                Entrada às {hora(resultado.entrouEm)}
                 {resultado.entrouPor ? `, por ${resultado.entrouPor}` : ''}
               </p>
               <p className="mt-6 max-w-xs text-sm opacity-80">
@@ -326,6 +513,16 @@ export function PainelPortaria({
               <p className="text-4xl font-black uppercase">Outro evento</p>
               <p className="mt-4 max-w-xs text-base">
                 Este ingresso é válido, mas não é para esta festa.
+              </p>
+            </>
+          )}
+
+          {resultado.situacao === 'desconhecido' && (
+            <>
+              <p className="text-4xl font-black uppercase">Não está na lista</p>
+              <p className="mt-4 max-w-xs text-base">
+                Pode ser um ingresso comprado depois que a lista foi baixada. Havendo rede, leia
+                de novo antes de barrar.
               </p>
             </>
           )}
