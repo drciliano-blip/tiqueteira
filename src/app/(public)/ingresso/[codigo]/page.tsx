@@ -146,6 +146,15 @@ export default async function Ingresso({ params }: Props) {
             barrados — por isso, se precisar repassar, use a transferência na área de ingressos.
           </p>
 
+          {autorizado && valido && (
+            <Link
+              href={`/meus-ingressos/transferir/${ingresso.id}`}
+              className="mt-6 block rounded-botao border border-line-forte px-5 py-3 text-center text-sm font-medium transition hover:border-accent hover:text-accent"
+            >
+              Transferir para outra pessoa
+            </Link>
+          )}
+
           <Link
             href="/meus-ingressos"
             className="mt-6 inline-block text-sm text-muted transition hover:text-txt"
