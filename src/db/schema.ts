@@ -1135,6 +1135,27 @@ export const guestListEntries = pgTable(
   ],
 );
 
+/**
+ * Limite de tentativas.
+ *
+ * Em ambiente serverless não existe memória compartilhada entre requisições —
+ * cada uma pode ser um processo novo. Contador em memória protegeria uma
+ * instância e deixaria as outras abertas, que é o mesmo que não proteger.
+ *
+ * Uma tabela pequena resolve: a contagem é atômica no banco, e o banco é o
+ * único lugar que todas as instâncias enxergam igual.
+ */
+export const rateLimits = pgTable(
+  'rate_limits',
+  {
+    /** `acao:identificador`, por exemplo `login:ana@exemplo.com`. */
+    chave: text('chave').primaryKey(),
+    janelaInicio: timestamp('janela_inicio', { withTimezone: true }).notNull().defaultNow(),
+    contador: integer('contador').notNull().default(0),
+  },
+  (t) => [index('rate_limits_janela_idx').on(t.janelaInicio)],
+);
+
 // ---------------------------------------------------------------------------
 // Tipos inferidos
 // ---------------------------------------------------------------------------
@@ -1163,6 +1184,7 @@ export type Chargeback = typeof chargebacks.$inferSelect;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
+export type RateLimit = typeof rateLimits.$inferSelect;
 export type BuyerAccessToken = typeof buyerAccessTokens.$inferSelect;
 export type EventSplit = typeof eventSplits.$inferSelect;
 export type GuestList = typeof guestLists.$inferSelect;

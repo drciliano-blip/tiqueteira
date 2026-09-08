@@ -36,6 +36,13 @@
       "when": 1788822085962,
       "tag": "0004_massive_madrox",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788892147561,
+      "tag": "0005_misty_hawkeye",
+      "breakpoints": true
     }
   ]
 }

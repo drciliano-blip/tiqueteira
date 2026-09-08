@@ -11,6 +11,7 @@ import { TTL_RESERVA_PADRAO_SEGUNDOS } from '@/domain/inventory';
 import { calcularTaxas } from '@/lib/fees';
 import { reservarEstoque } from '@/lib/inventory';
 import { aplicarBps } from '@/lib/money';
+import { mensagemDeEspera, registrarTentativa } from '@/lib/rate-limit';
 import { configDeTaxasDoTenant, resolverTenantPorSlug } from '@/lib/public-queries';
 
 /**
@@ -85,6 +86,13 @@ async function montarPedido(
     cabecalhos.get('x-real-ip') ??
     null;
   const userAgent = cabecalhos.get('user-agent');
+
+  /**
+   * Sem limite aqui, um script reserva todo o estoque de um lote sem pagar
+   * nada e derruba a venda. É o ataque mais barato contra uma bilheteria.
+   */
+  const limite = await registrarTentativa('criarPedido', ip ?? 'sem-ip');
+  if (!limite.permitido) throw new CompraError(mensagemDeEspera(limite.esperarSegundos));
 
   const orderId = await withTenant(tenant.id, async (tx) => {
     const [evento] = await tx

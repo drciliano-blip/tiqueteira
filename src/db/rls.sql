@@ -128,7 +128,8 @@ do $$
 declare
   t text;
   tabelas text[] := array[
-    'users', 'sessions', 'webhook_events', 'jobs', 'tenants', 'buyer_access_tokens'
+    'users', 'sessions', 'webhook_events', 'jobs', 'tenants',
+    'buyer_access_tokens', 'rate_limits'
   ];
 begin
   foreach t in array tabelas loop

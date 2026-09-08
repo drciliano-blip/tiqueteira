@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { serviceDb } from '@/db/client';
 import { users } from '@/db/schema';
 import { createSession, SESSION_TTL_MS, verifyPassword } from '@/lib/auth';
+import { limparTentativas, mensagemDeEspera, registrarTentativa } from '@/lib/rate-limit';
 import { setSessionCookie } from '@/lib/session-cookie';
 
 /**
@@ -36,6 +37,24 @@ export async function entrarComSenha(
 
   if (!dados.success) {
     return { erro: dados.error.issues[0]?.message ?? 'Dados inválidos.' };
+  }
+
+  const cabecalhosLimite = await headers();
+  const ipLimite =
+    cabecalhosLimite.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    cabecalhosLimite.get('x-real-ip') ??
+    'sem-ip';
+
+  /**
+   * Duas contagens: por e-mail e por origem. Só a primeira deixaria o
+   * atacante variar o e-mail; só a segunda puniria a rede compartilhada de
+   * um escritório inteiro.
+   */
+  for (const alvo of [dados.data.email, ipLimite]) {
+    const limite = await registrarTentativa('login', alvo);
+    if (!limite.permitido) {
+      return { erro: mensagemDeEspera(limite.esperarSegundos) };
+    }
   }
 
   const db = serviceDb();
@@ -81,6 +100,9 @@ export async function entrarComSenha(
       cabecalhos.get('x-real-ip'),
     userAgent: cabecalhos.get('user-agent'),
   });
+
+  // Login certo zera a contagem: quem lembrou a senha não fica de castigo.
+  await limparTentativas('login', dados.data.email);
 
   await setSessionCookie(sessao.token, sessao.expiraEm);
   await db.update(users).set({ ultimoLoginEm: new Date() }).where(eq(users.id, usuario.id));

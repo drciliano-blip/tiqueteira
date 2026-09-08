@@ -14,6 +14,7 @@ import {
 } from '@/lib/buyer-session';
 import { enviarEmail, esc, moldura } from '@/lib/email';
 import { env } from '@/lib/env';
+import { mensagemDeEspera, registrarTentativa } from '@/lib/rate-limit';
 
 export type EstadoAcesso = { enviado?: boolean; erro?: string };
 
@@ -34,8 +35,20 @@ export async function pedirLink(
   if (!dados.success) return { erro: dados.error.issues[0]?.message ?? 'E-mail inválido.' };
 
   const cabecalhos = await headers();
+  const ip =
+    cabecalhos.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    cabecalhos.get('x-real-ip') ??
+    'sem-ip';
+
+  // Sem limite, esta tela vira ferramenta de envio em massa contra endereços
+  // de terceiros — o e-mail sai do nosso domínio e a reputação é nossa.
+  for (const alvo of [dados.data, ip]) {
+    const limite = await registrarTentativa('linkAcesso', alvo);
+    if (!limite.permitido) return { erro: mensagemDeEspera(limite.esperarSegundos) };
+  }
+
   const { token } = await criarLinkDeAcesso(dados.data, {
-    ip: cabecalhos.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+    ip,
     userAgent: cabecalhos.get('user-agent'),
   });
 
