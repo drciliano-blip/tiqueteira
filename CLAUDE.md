@@ -6,7 +6,8 @@ Leia também `docs/plano.md`. Ele é a especificação; este arquivo é o resumo
 operacional. Decisões tomadas durante a construção ficam em `docs/decisoes.md`.
 
 ## O que é
-Marketplace de ingressos multi-tenant. O operador é [CNPJ do grupo — a definir].
+Marketplace de ingressos multi-tenant. O operador da plataforma é
+CR ADMINISTRACAO E PARTICIPACOES LTDA, CNPJ 47.301.164/0001-12.
 Produtores vendem ingressos dos próprios eventos. O operador cobra conveniência
 e/ou comissão.
 

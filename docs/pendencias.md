@@ -74,9 +74,18 @@ entrega de ingresso não pode contaminar o domínio institucional do grupo.
 A ligação com a Vercel é um CNAME.
 
 ### CNPJ operador e CNAE
-**Decisão tomada em 2026-09-07:** reaproveitar um CNPJ existente do grupo
-(espaço de eventos) e adicionar os CNAEs da atividade de bilheteria. Empresa
-com histórico passa mais rápido no KYC da PSP do que empresa recém-aberta.
+**RESOLVIDO em 2026-09-08 (ADR-010):** o operador é
+**CR ADMINISTRACAO E PARTICIPACOES LTDA**, CNPJ **47.301.164/0001-12**.
+
+**Três verificações que continuam pendentes com o contador**, e a primeira é
+a mais urgente:
+
+1. **A empresa tem inscrição municipal e pode emitir NFS-e?** Holding pura
+   costuma não ter, porque não presta serviço. Sem isso não há como faturar a
+   conveniência, e conseguir leva de dias a semanas.
+2. **Qual CNAE de serviço adicionar** (lista abaixo).
+3. **Regime tributário:** no Lucro Presumido, serviço tem base de 32%, não os
+   8% do comércio.
 
 **CNAEs candidatos** (validar com o contador):
 

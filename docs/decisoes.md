@@ -277,3 +277,42 @@ some junto com a pressa.
 **Consequência.** `docs/pendencias.md` deixa de listar a mudança de região
 como tarefa imediata e passa a listá-la como requisito da criação do ambiente
 de produção.
+
+
+---
+
+## ADR-010 — Operador da plataforma
+
+**Data:** 2026-09-08
+**Status:** aceita
+
+**Contexto.** A decisão nº 1 da seção 1 do plano — qual CNPJ do grupo opera a
+plataforma — bloqueava a conta na PSP, o contrato com produtor e a nota fiscal.
+
+**Decisão.** O operador é **CR ADMINISTRACAO E PARTICIPACOES LTDA**,
+CNPJ **47.301.164/0001-12**. Dígitos verificadores conferidos.
+
+É este CNPJ que:
+- abre o cadastro de recebedor "operador" na PSP;
+- assina o contrato plataforma–produtor;
+- emite NFS-e sobre a comissão e a taxa de conveniência — **nunca** sobre o
+  valor do ingresso;
+- figura como controlador ou operador dos dados nos termos de LGPD.
+
+**Consequências a resolver antes do go-live.**
+
+1. **Inscrição municipal e habilitação para NFS-e.** Empresa de administração
+   e participações frequentemente não tem inscrição municipal, porque holding
+   pura não presta serviço. Sem ela, não há como emitir nota da conveniência —
+   e obter leva de dias a semanas. É o item mais urgente de verificar.
+2. **CNAE de serviço.** Ver a seção correspondente em `docs/pendencias.md`.
+   Sem CNAE compatível, a PSP classifica como risco alto ou recusa.
+3. **Regime tributário.** Holding costuma estar no Lucro Presumido. Para
+   serviço, a base presumida é de 32%, não os 8% do comércio — muda a conta e
+   precisa de confirmação do contador.
+4. **Nome visível ao consumidor.** "CR ADMINISTRACAO E PARTICIPACOES" não diz
+   nada a quem comprou um ingresso. Nome desconhecido na fatura e na nota é
+   uma das causas mais comuns de contestação de cartão. Mitigação: descritor
+   de fatura curto e reconhecível (já configurado como `INGRESSOS`), nome
+   fantasia registrado, e identificação clara do operador no checkout e nos
+   termos.
