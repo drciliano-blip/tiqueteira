@@ -12,6 +12,10 @@
     {
       "path": "/api/jobs/reembolso-automatico",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/jobs/pagamento-atrasado",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { Archivo, Inter } from 'next/font/google';
 
@@ -21,6 +21,15 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: { default: 'Tiqueteira', template: '%s · Tiqueteira' },
   description: 'Ingressos para os melhores eventos.',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Portaria' },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#12131a',
+  // A portaria trabalha em tela cheia, com o polegar. Zoom acidental no meio
+  // da fila atrapalha mais do que ajuda.
+  maximumScale: 1,
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

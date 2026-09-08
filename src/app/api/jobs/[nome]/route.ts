@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { concluirJob, falharJob, reservarJobs, type NomeJob } from '@/lib/jobs';
 import { reembolsarPedidosDoEvento, type PayloadCancelamento } from '@/jobs/cancelar-evento';
 import { enviarIngressos, type PayloadEnvio } from '@/jobs/enviar-ingressos';
+import { reembolsarPagamentosAtrasados } from '@/jobs/reembolso-atrasado';
 import { devolverPedidosExpirados } from '@/jobs/expirar-reservas';
 import { env } from '@/lib/env';
 
@@ -17,7 +18,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const NOMES: NomeJob[] = ['enviar-ingressos', 'expirar-reservas', 'reembolso-automatico'];
+const NOMES: NomeJob[] = [
+  'enviar-ingressos',
+  'expirar-reservas',
+  'reembolso-automatico',
+  'pagamento-atrasado',
+];
 
 /** Comparação em tempo constante: `===` vaza o prefixo acertado pelo tempo. */
 function segredoConfere(recebido: string | null, esperado: string): boolean {
@@ -49,6 +55,15 @@ export async function POST(
   if (nome === 'expirar-reservas') {
     const resultado = await devolverPedidosExpirados();
     return NextResponse.json(resultado);
+  }
+
+  /**
+   * Varredura, não fila: procurar os pedidos pagos sem ingresso é uma
+   * consulta só, e enfileirar uma tarefa por pedido custaria mais que ela.
+   */
+  if (nome === 'pagamento-atrasado') {
+    const detalhe = await reembolsarPagamentosAtrasados();
+    return NextResponse.json({ detalhe });
   }
 
   const pendentes = await reservarJobs(nome as NomeJob);

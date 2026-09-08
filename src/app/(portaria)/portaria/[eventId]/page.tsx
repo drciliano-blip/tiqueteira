@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 
+import { RegistrarServiceWorker } from '@/components/registrar-sw';
 import { serviceDb } from '@/db/client';
 import { events } from '@/db/schema';
 import { temPapel } from '@/lib/auth';
@@ -65,10 +66,13 @@ export default async function Portaria({ params }: Props) {
   const inicial = await contarPresentes(evento.tenantId, evento.id);
 
   return (
-    <PainelPortaria
-      eventId={evento.id}
-      eventoTitulo={evento.titulo}
-      inicial={inicial}
-    />
+    <>
+      <RegistrarServiceWorker />
+      <PainelPortaria
+        eventId={evento.id}
+        eventoTitulo={evento.titulo}
+        inicial={inicial}
+      />
+    </>
   );
 }

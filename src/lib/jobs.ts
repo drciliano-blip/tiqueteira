@@ -17,7 +17,11 @@ import { and, eq, lte, or, sql } from 'drizzle-orm';
 import { serviceDb, type Database } from '@/db/client';
 import { jobs } from '@/db/schema';
 
-export type NomeJob = 'enviar-ingressos' | 'expirar-reservas' | 'reembolso-automatico';
+export type NomeJob =
+  | 'enviar-ingressos'
+  | 'expirar-reservas'
+  | 'reembolso-automatico'
+  | 'pagamento-atrasado';
 
 export type EnfileirarInput = {
   nome: NomeJob;

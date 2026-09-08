@@ -52,6 +52,7 @@ export default async function LayoutPainel({ children }: { children: ReactNode }
             { href: '/painel/vendas', rotulo: 'Vendas' },
             { href: '/painel/eventos/novo', rotulo: 'Novo evento' },
             { href: '/painel/espacos', rotulo: 'Espaços' },
+            { href: '/painel/saude', rotulo: 'Saúde' },
           ].map((item) => (
             <Link
               key={item.href}
