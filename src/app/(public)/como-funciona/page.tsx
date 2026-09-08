@@ -88,7 +88,7 @@ export default function ComoFunciona() {
   return (
     <div className="flex min-h-dvh flex-col">
       <Suspense fallback={<div className="h-16 border-b border-line" />}>
-        <Cabecalho comBusca={false} />
+        <Cabecalho comBusca={false} comCategorias={false} />
       </Suspense>
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-12">

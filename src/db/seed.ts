@@ -79,14 +79,14 @@ async function seed() {
     .insert(schema.tenants)
     .values([
       {
-        slug: 'super-festas',
-        nome: 'Super Festas',
-        razaoSocial: 'Super Festas Produções LTDA',
+        slug: 'complexo-jussara',
+        nome: 'Complexo Jussara',
+        razaoSocial: 'Complexo Jussara Eventos LTDA',
         cnpj: '11222333000181',
-        email: 'contato@superfestas.com.br',
+        email: 'contato@complexojussara.com.br',
         telefone: '11987654321',
         kycStatus: 'aprovado',
-        providerRecipientId: 'fake_rcpt_super',
+        providerRecipientId: 'fake_rcpt_jussara',
         corAcento: '#FF3D68',
         taxaMinimaCentavos: 399,
         taxaConvenienciaBps: 1000, // 10,00%
@@ -96,14 +96,14 @@ async function seed() {
         reservaCartaoBps: 2000, // 20% retidos até D+35
       },
       {
-        slug: 'hey-hey',
-        nome: 'Hey Hey Club',
-        razaoSocial: 'Hey Hey Entretenimento LTDA',
+        slug: 'fabrique',
+        nome: 'Fabrique',
+        razaoSocial: 'Fabrique Entretenimento LTDA',
         cnpj: '44555666000199',
-        email: 'financeiro@heyhey.com.br',
+        email: 'financeiro@fabrique.com.br',
         telefone: '11912345678',
         kycStatus: 'em_analise', // ainda não pode receber repasse
-        providerRecipientId: 'fake_rcpt_heyhey',
+        providerRecipientId: 'fake_rcpt_fabrique',
         corAcento: '#22D3A6',
         taxaMinimaCentavos: 399,
         taxaConvenienciaBps: 1200,
@@ -127,9 +127,9 @@ async function seed() {
     .insert(schema.users)
     .values([
       { email: 'admin@tiqueteira.local', nome: 'Operador da Plataforma', senhaHash: senha },
-      { email: 'ana@superfestas.com.br', nome: 'Ana Ribeiro', senhaHash: senha },
-      { email: 'bruno@heyhey.com.br', nome: 'Bruno Tavares', senhaHash: senha },
-      { email: 'portaria@superfestas.com.br', nome: 'Equipe de Portaria', senhaHash: senha },
+      { email: 'ana@complexojussara.com.br', nome: 'Ana Ribeiro', senhaHash: senha },
+      { email: 'bruno@fabrique.com.br', nome: 'Bruno Tavares', senhaHash: senha },
+      { email: 'portaria@complexojussara.com.br', nome: 'Equipe de Portaria', senhaHash: senha },
     ])
     .returning();
 
@@ -234,9 +234,9 @@ async function seed() {
       {
         tenantId: heyHey.id,
         venueId: fabrique.id,
-        slug: 'hey-hey-open-air',
+        slug: 'fabrique-open-air',
         categoria: 'show',
-        titulo: 'Hey Hey Open Air',
+        titulo: 'Fabrique Open Air',
         dataInicio: noite(45, 21),
         dataFim: noite(46, 6),
         capacidade: 800,
@@ -642,8 +642,8 @@ async function seed() {
 
   console.log('\nPronto.');
   console.log('  Login: admin@tiqueteira.local / tiqueteira-dev-123');
-  console.log('  Produtor A: ana@superfestas.com.br');
-  console.log('  Produtor B: bruno@heyhey.com.br');
+  console.log('  Produtor A: ana@complexojussara.com.br');
+  console.log('  Produtor B: bruno@fabrique.com.br');
 }
 
 async function main() {

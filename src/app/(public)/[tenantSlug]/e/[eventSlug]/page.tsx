@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Suspense } from 'react';
 
+import { Cabecalho } from '@/components/cabecalho';
 import { Cartaz } from '@/components/cartaz';
+import { Rodape } from '@/components/rodape';
 import { SeletorIngressos } from '@/components/seletor-ingressos';
 import { TemaTenant } from '@/components/tema-tenant';
 import { dataLonga, hora } from '@/lib/datas';
@@ -52,19 +55,23 @@ export default async function PaginaEvento({ params }: Props) {
       <TemaTenant corAcento={evento.corAcento ?? tenant.corAcento} />
 
       <div className="flex min-h-dvh flex-col">
-        <header className="sticky top-0 z-20 border-b border-line bg-base/85 backdrop-blur">
-          <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
-            <Link
-              href={`/${tenant.slug}`}
-              className="text-sm text-muted transition hover:text-txt"
-              aria-label={`Voltar para ${tenant.nome}`}
-            >
-              ← {tenant.nome}
-            </Link>
-          </div>
-        </header>
+        <Suspense fallback={<div className="h-16 border-b border-line" />}>
+          <Cabecalho comCategorias={false} />
+        </Suspense>
 
         <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-10 pt-6">
+          {/* Trilha em vez de seta solta: mostra onde você está, não só de
+              onde veio. */}
+          <nav aria-label="Você está em" className="mb-5 flex flex-wrap items-center gap-1.5 text-sm text-faint">
+            <Link href="/" className="transition hover:text-txt">
+              Início
+            </Link>
+            <span aria-hidden>/</span>
+            <Link href={`/${tenant.slug}`} className="transition hover:text-txt">
+              {tenant.nome}
+            </Link>
+          </nav>
+
           <div className="mx-auto max-w-[22rem] sm:max-w-[26rem]">
             <Cartaz
               eventoId={evento.id}
@@ -149,11 +156,7 @@ export default async function PaginaEvento({ params }: Props) {
           </section>
         </main>
 
-        <footer className="border-t border-line">
-          <div className="mx-auto max-w-3xl px-4 py-8 text-sm text-faint">
-            {tenant.nome} vende com a Tiqueteira.
-          </div>
-        </footer>
+        <Rodape />
       </div>
     </>
   );

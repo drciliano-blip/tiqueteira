@@ -48,7 +48,7 @@ export default function Publique() {
   return (
     <div className="flex min-h-dvh flex-col">
       <Suspense fallback={<div className="h-16 border-b border-line" />}>
-        <Cabecalho comBusca={false} />
+        <Cabecalho comBusca={false} comCategorias={false} />
       </Suspense>
 
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-12">

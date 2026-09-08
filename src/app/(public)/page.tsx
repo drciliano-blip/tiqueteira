@@ -4,8 +4,8 @@ import { Suspense } from 'react';
 import { Cabecalho } from '@/components/cabecalho';
 import { CartaoEvento } from '@/components/cartao-evento';
 import { Rodape } from '@/components/rodape';
+import { rotuloDaCategoria } from '@/domain/categorias';
 import {
-  CATEGORIAS,
   listarCidades,
   listarEventosDaPlataforma,
   listarMaisVendidos,
@@ -63,12 +63,6 @@ export default async function Home({ searchParams }: Props) {
 
   const filtrando = Boolean(q || cidade || categoria);
 
-  // Só mostra categoria que tem evento — chip que leva a lista vazia é ruído.
-  const categoriasComEvento = new Set(eventos.map((e) => e.categoria));
-  const categoriasVisiveis = CATEGORIAS.filter(
-    (c) => categoriasComEvento.has(c.valor) || categoria === c.valor,
-  );
-
   return (
     <div className="flex min-h-dvh flex-col">
       <Suspense fallback={<div className="h-16 border-b border-line" />}>
@@ -88,38 +82,20 @@ export default async function Home({ searchParams }: Props) {
           </section>
         )}
 
-        {(categoriasVisiveis.length > 1 || cidades.length > 1) && (
-          <div className="space-y-3 pb-8">
-            {categoriasVisiveis.length > 1 && (
-              <nav aria-label="Categorias" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-                <Chip href={href(filtros, { categoria: undefined })} ativo={!categoria}>
-                  Tudo
-                </Chip>
-                {categoriasVisiveis.map((c) => (
-                  <Chip
-                    key={c.valor}
-                    href={href(filtros, { categoria: c.valor })}
-                    ativo={categoria === c.valor}
-                  >
-                    {c.rotulo}
-                  </Chip>
-                ))}
-              </nav>
-            )}
-
-            {cidades.length > 1 && (
-              <nav aria-label="Cidades" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-                <Chip href={href(filtros, { cidade: undefined })} ativo={!cidade}>
-                  Todas as cidades
-                </Chip>
-                {cidades.map((c) => (
-                  <Chip key={c} href={href(filtros, { cidade: c })} ativo={cidade === c}>
-                    {c}
-                  </Chip>
-                ))}
-              </nav>
-            )}
-          </div>
+        {cidades.length > 1 && (
+          <nav
+            aria-label="Cidades"
+            className="-mx-4 mb-8 flex gap-2 overflow-x-auto px-4 pb-1"
+          >
+            <Chip href={href(filtros, { cidade: undefined })} ativo={!cidade}>
+              Todas as cidades
+            </Chip>
+            {cidades.map((c) => (
+              <Chip key={c} href={href(filtros, { cidade: c })} ativo={cidade === c}>
+                {c}
+              </Chip>
+            ))}
+          </nav>
         )}
 
         {!filtrando && maisVendidos.length > 0 && (
@@ -144,9 +120,11 @@ export default async function Home({ searchParams }: Props) {
 
         <section>
           <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-faint">
-            {filtrando
-              ? `${eventos.length} resultado${eventos.length === 1 ? '' : 's'}`
-              : 'Próximos'}
+            {categoria && !q
+              ? rotuloDaCategoria(categoria)
+              : filtrando
+                ? `${eventos.length} resultado${eventos.length === 1 ? '' : 's'}`
+                : 'Próximos'}
           </h2>
 
           {eventos.length === 0 ? (

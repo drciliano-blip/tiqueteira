@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { Suspense } from 'react';
 
+import { Cabecalho } from '@/components/cabecalho';
 import { CartaoEvento } from '@/components/cartao-evento';
-import { Marca } from '@/components/marca';
+import { Rodape } from '@/components/rodape';
 import { TemaTenant } from '@/components/tema-tenant';
 import { listarEventosDoTenant, resolverTenantPorSlug } from '@/lib/public-queries';
 
@@ -37,27 +39,49 @@ export default async function VitrineProdutor({ params }: Props) {
       <TemaTenant corAcento={tenant.corAcento} />
 
       <div className="flex min-h-dvh flex-col">
-        <header className="sticky top-0 z-20 border-b border-line bg-base/85 backdrop-blur">
-          <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-            <span className="font-titulo text-lg font-bold tracking-tight">{tenant.nome}</span>
-            <Marca href="/" />
-          </div>
-        </header>
+        {/*
+          O MESMO cabeçalho de todas as páginas. A vitrine do produtor é uma
+          seção da plataforma, não outro site — trocar a navegação aqui faz o
+          comprador achar que saiu do lugar onde estava comprando.
+        */}
+        <Suspense fallback={<div className="h-16 border-b border-line" />}>
+          <Cabecalho />
+        </Suspense>
 
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+          {/* Identidade do produtor, na cor dele. */}
+          <div className="flex items-center gap-4 border-b border-line pb-8">
+            <div
+              aria-hidden
+              className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-accent text-xl font-bold text-accent-txt"
+            >
+              {tenant.nome.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-bold leading-tight sm:text-2xl">
+                {tenant.nome}
+              </h1>
+              <p className="mt-0.5 text-sm text-muted">
+                {eventos.length === 0
+                  ? 'Nenhum evento à venda'
+                  : `${eventos.length} ${eventos.length === 1 ? 'evento' : 'eventos'}`}
+              </p>
+            </div>
+          </div>
+
           {eventos.length === 0 ? (
-            <div className="rounded-cartao border border-line bg-raised px-5 py-12 text-center">
+            <div className="mt-8 rounded-cartao border border-line bg-raised px-5 py-12 text-center">
               <p className="font-titulo text-lg font-semibold">Nenhum evento por aqui ainda</p>
-              <p className="mt-2 text-sm text-muted">
+              <p className="prosa mx-auto mt-2 text-sm text-muted">
                 Quando {tenant.nome} publicar o próximo, ele aparece nesta página.
               </p>
             </div>
           ) : (
             <>
               {aVenda.length > 0 && (
-                <section>
+                <section className="mt-8">
                   <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-faint">
-                    Próximos
+                    À venda
                   </h2>
                   <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
                     {aVenda.map((evento, i) => (
@@ -91,11 +115,7 @@ export default async function VitrineProdutor({ params }: Props) {
           )}
         </main>
 
-        <footer className="border-t border-line">
-          <div className="mx-auto max-w-5xl px-4 py-8 text-sm text-faint">
-            {tenant.nome} vende com a Tiqueteira.
-          </div>
-        </footer>
+        <Rodape />
       </div>
     </>
   );
