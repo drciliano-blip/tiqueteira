@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import { withTenant } from '@/db/client';
-import { events, ticketTypes, venues } from '@/db/schema';
+import { events, orders, ticketTypes, venues } from '@/db/schema';
 import { tenantAtual } from '@/lib/painel-contexto';
 import { atualizarEvento } from '../../acoes';
 import { FormularioEvento } from '../formulario-evento';
+import { CancelarEvento } from './cancelar';
 import { Lotes } from './lotes';
 import { BotoesStatus } from './status';
 
@@ -86,12 +87,22 @@ export default async function EditarEvento({ params }: Props) {
       .where(eq(ticketTypes.eventId, eventId))
       .orderBy(asc(ticketTypes.ordem), asc(ticketTypes.precoCentavos));
 
-    return { evento, espacos, lotes };
+    const [pagos] = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.eventId, eventId),
+          inArray(orders.status, ['paid', 'partially_refunded']),
+        ),
+      );
+
+    return { evento, espacos, lotes, pedidosPagos: Number(pagos?.n ?? 0) };
   });
 
   if (!dados) notFound();
 
-  const { evento, espacos, lotes } = dados;
+  const { evento, espacos, lotes, pedidosPagos } = dados;
   const inicio = partes(evento.dataInicio);
   const fim = partes(evento.dataFim);
 
@@ -170,6 +181,20 @@ export default async function EditarEvento({ params }: Props) {
           Abrir portaria
         </Link>
       </section>
+
+      {evento.status !== 'cancelado' && (
+        <section className="mt-16 border-t border-line pt-8">
+          <h2 className="font-titulo text-lg font-bold">Zona de risco</h2>
+          <div className="mt-4">
+            <CancelarEvento
+              tenantId={ctx.tenant.id}
+              eventId={evento.id}
+              titulo={evento.titulo}
+              pedidosPagos={pedidosPagos}
+            />
+          </div>
+        </section>
+      )}
     </main>
   );
 }

@@ -5,10 +5,11 @@ import { redirect } from 'next/navigation';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { withTenant } from '@/db/client';
-import { events, ticketTypes, venues } from '@/db/schema';
+import { serviceDb, withTenant } from '@/db/client';
+import { auditLog, events, ticketTypes, venues } from '@/db/schema';
 import { excedeCapacidade, excedeCotaMeia } from '@/domain/inventory';
 import { AuthError, requireRole } from '@/lib/auth';
+import { enfileirar } from '@/lib/jobs';
 import { reaisParaCentavos } from '@/lib/money';
 import { getAuth } from '@/lib/session-cookie';
 
@@ -540,4 +541,140 @@ export async function alternarLote(
   });
 
   revalidatePath(`/painel/eventos/${eventId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Cancelamento de evento
+// ---------------------------------------------------------------------------
+
+/**
+ * Cancelar evento é irreversível e devolve dinheiro para todo mundo.
+ *
+ * Por isso três travas: papel de dono ou administrador, confirmação digitando
+ * o título do evento, e justificativa obrigatória registrada no `audit_log`.
+ * Um clique só não pode disparar isso.
+ */
+export async function cancelarEvento(
+  tenantId: string,
+  eventId: string,
+  _anterior: EstadoFormulario,
+  formData: FormData,
+): Promise<EstadoFormulario> {
+  const justificativa = String(formData.get('justificativa') ?? '').trim();
+  const confirmacao = String(formData.get('confirmacao') ?? '').trim();
+
+  if (justificativa.length < 10) {
+    return { erro: 'Explique o motivo do cancelamento em pelo menos 10 caracteres.' };
+  }
+
+  const auth = await getAuth();
+  try {
+    requireRole(auth, tenantId, 'admin');
+  } catch (e) {
+    return {
+      erro:
+        e instanceof AuthError
+          ? 'Só o dono ou um administrador pode cancelar um evento.'
+          : 'Sem permissão.',
+    };
+  }
+
+  try {
+    await withTenant(tenantId, async (tx) => {
+      const [evento] = await tx
+        .select({ titulo: events.titulo, status: events.status })
+        .from(events)
+        .where(eq(events.id, eventId))
+        .limit(1);
+
+      if (!evento) throw new Error('Evento não encontrado.');
+      if (evento.status === 'cancelado') throw new Error('Este evento já está cancelado.');
+
+      // Digitar o título é o que separa o clique acidental do deliberado.
+      if (confirmacao !== evento.titulo) {
+        throw new Error('Para confirmar, digite o título do evento exatamente como aparece.');
+      }
+
+      await tx
+        .update(events)
+        .set({
+          status: 'cancelado',
+          canceladoEm: new Date(),
+          canceladoMotivo: justificativa,
+          atualizadoEm: new Date(),
+        })
+        .where(eq(events.id, eventId));
+    });
+  } catch (e) {
+    return { erro: e instanceof Error ? e.message : 'Não foi possível cancelar.' };
+  }
+
+  const db = serviceDb();
+
+  await db.insert(auditLog).values({
+    tenantId,
+    userId: auth?.userId ?? null,
+    acao: 'cancelar_evento',
+    entidade: 'events',
+    entidadeId: eventId,
+    depois: { justificativa },
+  });
+
+  // O reembolso roda em lotes pela fila: um evento de mil pedidos não cabe
+  // no tempo de uma requisição.
+  await enfileirar(db, {
+    nome: 'reembolso-automatico',
+    tenantId,
+    payload: { tenantId, eventId, solicitadoPor: auth?.userId },
+    dedupeKey: `cancelamento:${eventId}`,
+  });
+
+  revalidatePath(`/painel/eventos/${eventId}`);
+  revalidatePath('/painel');
+  return { ok: true };
+}
+
+/** Reembolso avulso, a partir da tela do pedido. */
+export async function reembolsarPedido(
+  tenantId: string,
+  orderId: string,
+  _anterior: EstadoFormulario,
+  formData: FormData,
+): Promise<EstadoFormulario> {
+  const quantidade = Number.parseInt(String(formData.get('quantidade') ?? '0'), 10);
+  const observacao = String(formData.get('observacao') ?? '').trim();
+  const manual = formData.get('manual') === 'on';
+
+  if (!Number.isInteger(quantidade) || quantidade < 1) {
+    return { erro: 'Escolha quantos ingressos devolver.' };
+  }
+
+  const auth = await getAuth();
+  try {
+    requireRole(auth, tenantId, manual ? 'admin' : 'operador');
+  } catch (e) {
+    return {
+      erro:
+        e instanceof AuthError && manual
+          ? 'Reembolso fora do prazo exige dono ou administrador.'
+          : 'Sem permissão.',
+    };
+  }
+
+  const { executarReembolso } = await import('@/lib/refunds');
+
+  const r = await executarReembolso({
+    tenantId,
+    orderId,
+    quantidade,
+    motivo: 'buyer_request',
+    manual,
+    solicitadoPor: auth?.userId ?? null,
+    observacao: observacao || undefined,
+  });
+
+  if (!r.ok) return { erro: r.erro };
+
+  revalidatePath(`/painel/vendas/${orderId}`);
+  return { ok: true };
 }

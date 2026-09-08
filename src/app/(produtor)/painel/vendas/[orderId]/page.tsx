@@ -7,6 +7,7 @@ import { dataLonga, hora } from '@/lib/datas';
 import { formatarBRL } from '@/lib/money';
 import { tenantAtual } from '@/lib/painel-contexto';
 import { detalharVenda } from '@/lib/vendas-queries';
+import { FormularioReembolso } from './reembolsar';
 import { BotaoReenviar } from './reenviar';
 
 export const metadata: Metadata = { title: 'Pedido' };
@@ -154,6 +155,25 @@ export default async function DetalheDoPedido({ params }: Props) {
           </ul>
         )}
       </section>
+
+      {(pedido.status === 'paid' || pedido.status === 'partially_refunded') && (
+        <section className="mt-10">
+          <h2 className="font-titulo text-lg font-bold">Reembolso</h2>
+          <p className="prosa mt-2 text-sm text-muted">
+            Dentro dos 7 dias da compra a devolução é integral, taxa incluída. Fora do prazo,
+            vale a política do evento — e só dono ou administrador pode autorizar a exceção.
+          </p>
+          <div className="mt-4">
+            <FormularioReembolso
+              tenantId={ctx.tenant.id}
+              orderId={pedido.id}
+              ingressosValidos={pedido.ingressos.filter((i) => i.status === 'valido').length}
+              totalCentavos={pedido.totalCentavos}
+              podeManual={ctx.papel === 'owner' || ctx.papel === 'admin'}
+            />
+          </div>
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="font-titulo text-lg font-bold">Itens</h2>

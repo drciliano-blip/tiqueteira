@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 
 import { concluirJob, falharJob, reservarJobs, type NomeJob } from '@/lib/jobs';
+import { reembolsarPedidosDoEvento, type PayloadCancelamento } from '@/jobs/cancelar-evento';
 import { enviarIngressos, type PayloadEnvio } from '@/jobs/enviar-ingressos';
 import { devolverPedidosExpirados } from '@/jobs/expirar-reservas';
 import { env } from '@/lib/env';
@@ -63,6 +64,8 @@ export async function POST(
           env().TICKET_HMAC_SECRET,
           env().NEXT_PUBLIC_APP_URL,
         );
+      } else if (job.nome === 'reembolso-automatico') {
+        detalhe = await reembolsarPedidosDoEvento(job.payload as PayloadCancelamento);
       }
 
       await concluirJob(job.id);
