@@ -21,6 +21,8 @@ export type ValoresEvento = {
   classificacaoEtaria: number;
   ingressoNominal: boolean;
   exigeDocumentoEntrada: boolean;
+  controlaSaida: boolean;
+  permiteReentrada: boolean;
 };
 
 export type Espaco = { id: string; nome: string; capacidadeMaxima: number };
@@ -264,6 +266,38 @@ export function FormularioEvento({
             <span className="block text-xs text-faint">
               A portaria exige confirmação do operador a cada leitura. Deixa a fila mais lenta e
               a fraude muito mais difícil.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            name="controlaSaida"
+            defaultChecked={valores?.controlaSaida ?? false}
+            className="mt-0.5 h-4 w-4"
+          />
+          <span>
+            Registrar saída na portaria
+            <span className="block text-xs text-faint">
+              A porta passa a ler o QR nos dois sentidos, e o contador mostra quantas pessoas
+              estão na casa agora — não quantas já passaram. É o número que o bombeiro pede.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            name="permiteReentrada"
+            defaultChecked={valores?.permiteReentrada ?? true}
+            className="mt-0.5 h-4 w-4"
+          />
+          <span>
+            Permitir voltar depois de sair
+            <span className="block text-xs text-faint">
+              Só vale com o registro de saída ligado. Desmarcado, quem sai não entra de novo com
+              o mesmo ingresso.
             </span>
           </span>
         </label>

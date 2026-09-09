@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
 import { ScannerQr } from '@/components/scanner-qr';
+import type { Movimento, PoliticaPortaria } from '@/domain/portaria';
 import type { ContadorPortaria, ResultadoCheckin } from '@/lib/checkin';
 import {
   baixarManifesto,
@@ -27,7 +28,12 @@ import { buscar, contador, liberarManualmente, lerQr, marcarDocumento } from './
  * **Funciona sem rede.** O aparelho baixa o manifesto ao abrir e valida no
  * local. Quando há rede, quem decide é o servidor — só ele enxerga o que os
  * outros portões fizeram. Sem rede, a validação local segura a operação e a
- * entrada entra numa fila que sobe depois.
+ * passagem entra numa fila que sobe depois.
+ *
+ * **O sentido é grudento.** Um aparelho escalado para a saída fica na saída,
+ * inclusive depois de recarregar a página. Voltar sozinho para "entrada"
+ * seria o pior erro possível: o operador continuaria lendo QRs sem perceber
+ * que trocou de sentido, e cada saída viraria uma recusa na cara da pessoa.
  */
 
 type Modo = 'scanner' | 'busca';
@@ -39,12 +45,25 @@ type Resultado = ResultadoCheckin | { situacao: 'desconhecido' };
 const CORES: Record<string, string> = {
   liberado: 'bg-sucesso text-black',
   documento: 'bg-alerta text-black',
-  duplicado: 'bg-perigo text-white',
-  cancelado: 'bg-perigo text-white',
+  // Branco para a saída: distinto do verde da entrada mesmo de relance, no
+  // escuro, e sem depender da cor do produtor.
+  saida: 'bg-white text-black',
+  recusado: 'bg-perigo text-white',
   outro_evento: 'bg-perigo text-white',
   invalido: 'bg-perigo text-white',
   desconhecido: 'bg-alerta text-black',
 };
+
+const TITULO_RECUSA: Record<string, string> = {
+  ja_entrou: 'Já entrou',
+  reentrada_bloqueada: 'Não pode voltar',
+  nao_esta_dentro: 'Não está na casa',
+  cancelado: 'Cancelado',
+  transferido: 'Transferido',
+  saida_nao_controlada: 'Saída desligada',
+};
+
+const CHAVE_SENTIDO = (eventId: string) => `portaria:sentido:${eventId}`;
 
 function hora(d: Date | string): string {
   const data = typeof d === 'string' ? new Date(d) : d;
@@ -59,12 +78,15 @@ export function PainelPortaria({
   eventId,
   eventoTitulo,
   inicial,
+  politica,
 }: {
   eventId: string;
   eventoTitulo: string;
   inicial: ContadorPortaria;
+  politica: PoliticaPortaria;
 }) {
   const [modo, setModo] = useState<Modo>('scanner');
+  const [sentido, setSentido] = useState<Movimento>('entrada');
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [aguardandoDocumento, setAguardandoDocumento] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -109,6 +131,13 @@ export function PainelPortaria({
       setPendentes(filaPendente(eventId).length);
       setOnline(navigator.onLine);
 
+      try {
+        const salvo = localStorage.getItem(CHAVE_SENTIDO(eventId));
+        if (salvo === 'saida' || salvo === 'entrada') setSentido(salvo);
+      } catch {
+        // Aba privada. Segue na entrada, que é o padrão.
+      }
+
       const atualizado = await baixarManifesto(eventId);
       if (ativo && atualizado) setManifesto(atualizado);
     })();
@@ -118,12 +147,24 @@ export function PainelPortaria({
     };
   }, [eventId]);
 
+  const trocarSentido = useCallback(
+    (novo: Movimento) => {
+      setSentido(novo);
+      setResultado(null);
+      try {
+        localStorage.setItem(CHAVE_SENTIDO(eventId), novo);
+      } catch {
+        // Não poder lembrar não pode impedir de trocar agora.
+      }
+    },
+    [eventId],
+  );
+
   useEffect(() => {
     if (!manifesto) return;
 
     const geradoEm = new Date(manifesto.geradoEm).getTime();
-    const atualizar = () =>
-      setIdadeDoManifesto(Math.round((Date.now() - geradoEm) / 60_000));
+    const atualizar = () => setIdadeDoManifesto(Math.round((Date.now() - geradoEm) / 60_000));
 
     // Primeira medida no próximo tique, não no corpo do efeito: medir o
     // relógio durante a renderização torna o resultado instável.
@@ -173,6 +214,21 @@ export function PainelPortaria({
     if (!pedeDocumento) setTimeout(() => setResultado(null), 2500);
   }, []);
 
+  /** Move o contador local na direção certa, sem esperar o servidor. */
+  const contarLocalmente = useCallback((movimento: Movimento, reentrada: boolean) => {
+    setNumeros((n) => {
+      if (movimento === 'saida') {
+        return { ...n, dentro: Math.max(0, n.dentro - 1), sairam: n.sairam + 1 };
+      }
+      return {
+        ...n,
+        dentro: n.dentro + 1,
+        entraram: reentrada ? n.entraram : n.entraram + 1,
+        sairam: reentrada ? Math.max(0, n.sairam - 1) : n.sairam,
+      };
+    });
+  }, []);
+
   const processar = useCallback(
     (token: string) => {
       ultimoToken.current = token;
@@ -187,11 +243,11 @@ export function PainelPortaria({
             return;
           }
 
-          const local = await validarLocalmente(eventId, token, manifesto, indice);
+          const local = await validarLocalmente(eventId, token, manifesto, indice, sentido);
           setPendentes(filaPendente(eventId).length);
 
           if (local.situacao === 'liberado') {
-            setNumeros((n) => ({ ...n, presentes: n.presentes + 1 }));
+            contarLocalmente('entrada', local.reentrada);
             mostrar(
               {
                 situacao: 'liberado',
@@ -200,23 +256,35 @@ export function PainelPortaria({
                 titular: local.titular,
                 titularCpf: local.cpfParcial,
                 lote: local.lote,
+                reentrada: local.reentrada,
                 exigeDocumento: local.exigeDocumento,
               },
               local.exigeDocumento,
             );
-          } else if (local.situacao === 'duplicado') {
+          } else if (local.situacao === 'saida') {
+            contarLocalmente('saida', false);
             mostrar(
               {
-                situacao: 'duplicado',
+                situacao: 'saida',
+                ticketId: '',
                 codigo: local.codigo,
                 titular: local.titular,
-                entrouEm: new Date(local.entrouEm),
+                entrouEm: local.entrouEm ? new Date(local.entrouEm) : null,
+              },
+              false,
+            );
+          } else if (local.situacao === 'recusado') {
+            mostrar(
+              {
+                situacao: 'recusado',
+                motivo: local.motivo,
+                explicacao: local.explicacao,
+                codigo: local.codigo,
+                titular: local.titular,
                 entrouPor: null,
               },
               false,
             );
-          } else if (local.situacao === 'cancelado') {
-            mostrar({ situacao: 'cancelado', codigo: local.codigo, motivo: null }, false);
           } else {
             mostrar({ situacao: 'desconhecido' }, false);
           }
@@ -224,23 +292,24 @@ export function PainelPortaria({
         }
 
         // Com rede, o servidor manda: só ele vê os outros portões.
-        const r = await lerQr(eventId, token);
+        const r = await lerQr(eventId, token, sentido);
         if (!r.ok) {
           setErro(r.erro);
           return;
         }
 
-        const pedeDocumento =
-          r.resultado.situacao === 'liberado' && r.resultado.exigeDocumento;
+        const pedeDocumento = r.resultado.situacao === 'liberado' && r.resultado.exigeDocumento;
 
         if (r.resultado.situacao === 'liberado') {
-          setNumeros((n) => ({ ...n, presentes: n.presentes + 1 }));
+          contarLocalmente('entrada', r.resultado.reentrada);
+        } else if (r.resultado.situacao === 'saida') {
+          contarLocalmente('saida', false);
         }
 
         mostrar(r.resultado, pedeDocumento);
       });
     },
-    [eventId, manifesto, indice, mostrar],
+    [eventId, manifesto, indice, mostrar, sentido, contarLocalmente],
   );
 
   /** Busca: cai para o manifesto quando não há rede. */
@@ -264,6 +333,9 @@ export function PainelPortaria({
               l: '',
               s: t.status,
               e: t.checkedInEm ? new Date(t.checkedInEm).toISOString() : null,
+              i: t.dentro,
+              q: t.entradasCount,
+              x: t.ultimaSaidaEm ? new Date(t.ultimaSaidaEm).toISOString() : null,
               id: t.id,
             })),
           );
@@ -283,6 +355,13 @@ export function PainelPortaria({
       ? 'documento'
       : resultado?.situacao;
 
+  /**
+   * A política do servidor manda; o manifesto cobre o caso de a página ter
+   * vindo do cache do service worker com dado velho.
+   */
+  const controlaSaida = manifesto?.controlaSaida ?? politica.controlaSaida;
+  const naSaida = controlaSaida && sentido === 'saida';
+
   return (
     <div className="flex min-h-dvh flex-col bg-black text-white">
       <header className="flex items-center justify-between gap-3 px-4 py-3">
@@ -301,13 +380,49 @@ export function PainelPortaria({
           </p>
         </div>
 
-        <p className="tabular shrink-0 text-sm">
-          <span className="font-bold">{numeros.presentes}</span>
+        {/**
+         * Com controle de saída, o número que importa é quem está DENTRO —
+         * é o que o bombeiro pergunta e o que o produtor quer saber às duas
+         * da manhã. Sem controle de saída, "dentro" seria só um sinônimo
+         * confuso de "já entrou", então a tela mostra o que é verdade.
+         */}
+        <p className="tabular shrink-0 text-right text-sm leading-tight">
+          <span className="font-bold">{controlaSaida ? numeros.dentro : numeros.entraram}</span>
           <span className="text-white/50"> / {numeros.emitidos}</span>
+          {controlaSaida && (
+            <span className="block text-[11px] text-white/40">
+              {numeros.entraram} entraram · {numeros.sairam} saíram
+            </span>
+          )}
         </p>
       </header>
 
-      <main className="flex-1 px-4 pb-4">
+      {controlaSaida && (
+        <div className="grid grid-cols-2 gap-2 px-4 pb-3">
+          <button
+            type="button"
+            onClick={() => trocarSentido('entrada')}
+            aria-pressed={!naSaida}
+            className={`rounded-botao py-3 text-lg font-bold ${
+              naSaida ? 'bg-white/10 text-white/60' : 'bg-sucesso text-black'
+            }`}
+          >
+            Entrada
+          </button>
+          <button
+            type="button"
+            onClick={() => trocarSentido('saida')}
+            aria-pressed={naSaida}
+            className={`rounded-botao py-3 text-lg font-bold ${
+              naSaida ? 'bg-white text-black' : 'bg-white/10 text-white/60'
+            }`}
+          >
+            Saída
+          </button>
+        </div>
+      )}
+
+      <main className={`flex-1 px-4 pb-4 ${naSaida ? 'ring-inset ring-4 ring-white/80' : ''}`}>
         {modo === 'scanner' ? (
           <>
             <ScannerQr onLeitura={processar} pausado={resultado !== null || processando} />
@@ -354,37 +469,41 @@ export function PainelPortaria({
                       {t.c}
                       {t.d ? ` · ***${t.d}**` : ''}
                       {t.e ? ` · entrou ${hora(t.e)}` : ''}
+                      {t.x ? ` · saiu ${hora(t.x)}` : ''}
+                      {controlaSaida && t.i ? ' · na casa' : ''}
                     </p>
                   </div>
 
-                  {t.s === 'valido' && t.id ? (
+                  {t.id ? (
                     <button
                       type="button"
                       disabled={processando}
                       onClick={() =>
                         iniciar(async () => {
-                          const r = await liberarManualmente(eventId, t.id!);
-                          if (r.ok) {
-                            if (r.resultado.situacao === 'liberado') {
-                              setNumeros((n) => ({ ...n, presentes: n.presentes + 1 }));
-                              mostrar(r.resultado, r.resultado.exigeDocumento);
-                            } else {
-                              mostrar(r.resultado, false);
-                            }
-                            setTermo('');
-                          } else {
+                          const r = await liberarManualmente(eventId, t.id!, sentido);
+                          if (!r.ok) {
                             setErro(r.erro);
+                            return;
                           }
+
+                          if (r.resultado.situacao === 'liberado') {
+                            contarLocalmente('entrada', r.resultado.reentrada);
+                            mostrar(r.resultado, r.resultado.exigeDocumento);
+                          } else {
+                            if (r.resultado.situacao === 'saida') contarLocalmente('saida', false);
+                            mostrar(r.resultado, false);
+                          }
+                          setTermo('');
                         })
                       }
-                      className="shrink-0 rounded-botao bg-sucesso px-4 py-2 text-sm font-semibold text-black"
+                      className={`shrink-0 rounded-botao px-4 py-2 text-sm font-semibold ${
+                        naSaida ? 'bg-white text-black' : 'bg-sucesso text-black'
+                      }`}
                     >
-                      Liberar
+                      {naSaida ? 'Saída' : 'Liberar'}
                     </button>
                   ) : (
-                    <span className="shrink-0 text-xs uppercase text-white/40">
-                      {t.s === 'valido' ? 'leia o QR' : t.s}
-                    </span>
+                    <span className="shrink-0 text-xs uppercase text-white/40">leia o QR</span>
                   )}
                 </li>
               ))}
@@ -440,7 +559,11 @@ export function PainelPortaria({
           {resultado.situacao === 'liberado' && (
             <>
               <p className="text-4xl font-black uppercase">
-                {resultado.exigeDocumento ? 'Confira o documento' : 'Pode entrar'}
+                {resultado.exigeDocumento
+                  ? 'Confira o documento'
+                  : resultado.reentrada
+                    ? 'Voltou — pode entrar'
+                    : 'Pode entrar'}
               </p>
               <p className="mt-4 text-2xl font-bold">{resultado.titular}</p>
               {resultado.titularCpf && (
@@ -480,30 +603,31 @@ export function PainelPortaria({
             </>
           )}
 
-          {resultado.situacao === 'duplicado' && (
+          {resultado.situacao === 'saida' && (
             <>
-              <p className="text-4xl font-black uppercase">Já entrou</p>
+              <p className="text-4xl font-black uppercase">Saída registrada</p>
               <p className="mt-4 text-2xl font-bold">{resultado.titular}</p>
-              <p className="mt-3 text-lg">
-                Entrada às {hora(resultado.entrouEm)}
-                {resultado.entrouPor ? `, por ${resultado.entrouPor}` : ''}
-              </p>
-              <p className="mt-6 max-w-xs text-sm opacity-80">
-                Este ingresso já foi usado. Chame a supervisão se a pessoa contestar.
-              </p>
+              {resultado.entrouEm && (
+                <p className="mt-3 text-lg">Entrou às {hora(resultado.entrouEm)}</p>
+              )}
+              <p className="mt-2 text-base opacity-70">{resultado.codigo}</p>
             </>
           )}
 
-          {resultado.situacao === 'cancelado' && (
+          {resultado.situacao === 'recusado' && (
             <>
-              <p className="text-4xl font-black uppercase">Cancelado</p>
-              <p className="mt-4 text-lg">Código {resultado.codigo}</p>
-              <p className="mt-2 max-w-xs text-sm opacity-80">
-                {resultado.motivo === 'refunded'
-                  ? 'Ingresso reembolsado.'
-                  : resultado.motivo === 'chargeback'
-                    ? 'Pagamento contestado.'
-                    : 'Ingresso cancelado.'}
+              <p className="text-4xl font-black uppercase">
+                {TITULO_RECUSA[resultado.motivo] ?? 'Não pode passar'}
+              </p>
+              {resultado.titular && (
+                <p className="mt-4 text-2xl font-bold">{resultado.titular}</p>
+              )}
+              <p className="mt-3 max-w-xs text-lg">{resultado.explicacao}</p>
+              {resultado.entrouPor && (
+                <p className="mt-2 text-sm opacity-80">Liberado por {resultado.entrouPor}</p>
+              )}
+              <p className="mt-6 max-w-xs text-sm opacity-70">
+                Chame a supervisão se a pessoa contestar.
               </p>
             </>
           )}

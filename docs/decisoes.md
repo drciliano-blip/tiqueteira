@@ -316,3 +316,71 @@ CNPJ **47.301.164/0001-12**. Dígitos verificadores conferidos.
    de fatura curto e reconhecível (já configurado como `INGRESSOS`), nome
    fantasia registrado, e identificação clara do operador no checkout e nos
    termos.
+
+---
+
+## ADR-011 — Controle de saída e reentrada na portaria
+
+**Data:** 2026-09-09
+**Status:** aceita
+
+**Contexto.** Até aqui o ingresso ia de `valido` para `usado` e parava ali. O
+contador da portaria dizia **quem já entrou**, e esse número só cresce. Ele
+não responde às duas perguntas que aparecem na operação real: quantas pessoas
+estão na casa agora — que é o que o bombeiro pergunta — e o que fazer com
+quem sai para o carro e quer voltar, que em casa noturna é a regra, não a
+exceção.
+
+**Decisão.** A porta passa a registrar os dois sentidos, com duas chaves de
+configuração **por evento**:
+
+- `controla_saida` — desligado por padrão. Desligado, o evento se comporta
+  exatamente como antes.
+- `permite_reentrada` — ligado por padrão. Só tem efeito com o controle de
+  saída ligado.
+
+Três peças sustentam isso:
+
+1. **`src/domain/portaria.ts`** — função pura que decide entrada, saída ou
+   recusa. A recusa carrega motivo e uma frase pronta com a hora do fato.
+2. **Colunas em `tickets`** (`dentro`, `entradas_count`, `ultima_entrada_em`,
+   `ultima_saida_em`) — o estado atual, para o `UPDATE` condicional atômico.
+3. **Tabela `ticket_movimentos`** — o livro da porta, com a chave natural
+   (ingresso, tipo, hora).
+
+**Razão de o estado ser coluna e não contagem sobre o livro.** A porta precisa
+decidir com um `UPDATE` condicional: ler para depois decidir abre a janela por
+onde dois portões deixam o mesmo QR passar duas vezes. Contar movimentos a
+cada leitura seria ler antes de decidir, com outro nome.
+
+**Razão de o livro existir mesmo assim.** O estado diz onde a pessoa está; o
+livro diz o caminho que ela fez. É dele que sai a resposta para "a que horas
+ela saiu", a curva de público da noite, e — principalmente — a convergência da
+sincronização offline: o servidor recalcula o estado a partir do livro
+inteiro, então filas que sobem fora de ordem, ou duas vezes, chegam ao mesmo
+resultado.
+
+**A regra que não pode cair: quem está dentro não entra de novo.** Sem ela, o
+controle de saída viraria exatamente a brecha que o controle de entrada existe
+para fechar — bastaria alternar leituras para o mesmo ingresso servir a duas
+pessoas a noite inteira. Está no domínio, no `UPDATE` (`dentro = false` é
+condição da reentrada) e no teste de concorrência.
+
+**Sair é sempre permitido a quem está dentro**, inclusive com ingresso
+cancelado depois da entrada. Reembolso ou chargeback às 23h não podem prender
+ninguém lá dentro, e um contador que nunca zera é pior que um contador com uma
+saída a mais. Por isso o CHECK de `dentro` se apoia em `entradas_count > 0`, e
+não no status.
+
+**Consequência para a portaria offline.** O manifesto passou a levar a
+política e o estado de cada ingresso, e o aparelho decide com a **mesma
+função pura** do servidor. Duplicar a regra no cliente seria garantir que um
+dia as duas divergissem — e a divergência apareceria na porta, à uma da manhã.
+O sentido escolhido (entrada ou saída) fica gravado no aparelho: um celular
+escalado para a saída não pode voltar sozinho para "entrada" depois de
+recarregar a página.
+
+**Limite que continua o mesmo.** Offline, dois portões sem comunicação entre
+si deixam o mesmo QR passar duas vezes. Nada resolve isso do lado do aparelho.
+A sincronização registra que aconteceu; só portão único ou rede entre
+aparelhos evita o furo.

@@ -54,6 +54,8 @@ export default async function EditarEvento({ params }: Props) {
         classificacaoEtaria: events.classificacaoEtaria,
         ingressoNominal: events.ingressoNominal,
         exigeDocumentoEntrada: events.exigeDocumentoEntrada,
+        controlaSaida: events.controlaSaida,
+        permiteReentrada: events.permiteReentrada,
         status: events.status,
       })
       .from(events)
@@ -163,6 +165,8 @@ export default async function EditarEvento({ params }: Props) {
               classificacaoEtaria: evento.classificacaoEtaria,
               ingressoNominal: evento.ingressoNominal,
               exigeDocumentoEntrada: evento.exigeDocumentoEntrada,
+              controlaSaida: evento.controlaSaida,
+              permiteReentrada: evento.permiteReentrada,
             }}
           />
         </div>

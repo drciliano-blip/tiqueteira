@@ -37,6 +37,8 @@ export async function GET(
       tenantId: events.tenantId,
       titulo: events.titulo,
       nominal: events.ingressoNominal,
+      controlaSaida: events.controlaSaida,
+      permiteReentrada: events.permiteReentrada,
     })
     .from(events)
     .where(eq(events.id, eventId))
@@ -59,6 +61,10 @@ export async function GET(
         l: ticketTypes.nome,
         s: tickets.status,
         e: tickets.checkedInEm,
+        i: tickets.dentro,
+        q: tickets.entradasCount,
+        x: tickets.ultimaSaidaEm,
+        ue: tickets.ultimaEntradaEm,
       })
       .from(tickets)
       .innerJoin(ticketTypes, eq(ticketTypes.id, tickets.ticketTypeId))
@@ -70,6 +76,13 @@ export async function GET(
       eventId,
       titulo: evento.titulo,
       nominal: evento.nominal,
+      /**
+       * A política viaja junto com a lista: sem rede o aparelho precisa
+       * decidir reentrada sozinho, e perguntar ao servidor é justamente o
+       * que ele não pode fazer.
+       */
+      controlaSaida: evento.controlaSaida,
+      permiteReentrada: evento.permiteReentrada,
       geradoEm: new Date().toISOString(),
       total: linhas.length,
       ingressos: linhas.map((t) => ({
@@ -81,7 +94,10 @@ export async function GET(
         d: t.d ? t.d.slice(3, 9) : null,
         l: t.l,
         s: t.s,
-        e: t.e ? t.e.toISOString() : null,
+        e: (t.ue ?? t.e)?.toISOString() ?? null,
+        i: t.i,
+        q: t.q,
+        x: t.x ? t.x.toISOString() : null,
       })),
     },
     { headers: { 'cache-control': 'no-store' } },

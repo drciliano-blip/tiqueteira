@@ -188,6 +188,9 @@ export const externalPaymentEnum = pgEnum('external_payment', [
 
 export const guestEntryTypeEnum = pgEnum('guest_entry_type', ['cortesia', 'desconto']);
 
+/** Cada passagem pela porta, nos dois sentidos — ADR-011. */
+export const movimentoTipoEnum = pgEnum('movimento_tipo', ['entrada', 'saida']);
+
 export const jobStatusEnum = pgEnum('job_status', [
   'pending',
   'running',
@@ -400,6 +403,17 @@ export const events = pgTable(
     // Ingresso nominal e conferência de documento (plano, seção 24)
     ingressoNominal: boolean('ingresso_nominal').notNull().default(true),
     exigeDocumentoEntrada: boolean('exige_documento_entrada').notNull().default(false),
+
+    /**
+     * Controle de saída — ADR-011.
+     *
+     * Desligado, o evento se comporta como sempre se comportou: entrou, o
+     * ingresso morre. Ligado, a porta registra os dois sentidos e o contador
+     * passa a dizer quem está DENTRO, que é o número que o bombeiro pede.
+     */
+    controlaSaida: boolean('controla_saida').notNull().default(false),
+    /** Só faz sentido com `controlaSaida`. Padrão de casa noturna: pode voltar. */
+    permiteReentrada: boolean('permite_reentrada').notNull().default(true),
 
     // Transferência de titularidade (plano, seção 23.3)
     permiteTransferencia: boolean('permite_transferencia').notNull().default(true),
@@ -763,6 +777,18 @@ export const tickets = pgTable(
     checkedInDeviceId: text('checked_in_device_id'),
     documentoConferido: boolean('documento_conferido').notNull().default(false),
 
+    /**
+     * Está na casa agora — ADR-011. É coluna, e não contagem sobre
+     * `ticket_movimentos`, porque a porta precisa de um `UPDATE` condicional
+     * atômico: ler para depois decidir abriria a janela por onde dois
+     * aparelhos deixariam o mesmo QR entrar duas vezes.
+     */
+    dentro: boolean('dentro').notNull().default(false),
+    /** Primeira entrada fica em `checkedInEm`; esta acompanha a reentrada. */
+    ultimaEntradaEm: timestamp('ultima_entrada_em', { withTimezone: true }),
+    ultimaSaidaEm: timestamp('ultima_saida_em', { withTimezone: true }),
+    entradasCount: integer('entradas_count').notNull().default(0),
+
     transferidoDeTicketId: uuid('transferido_de_ticket_id').references(
       (): AnyPgColumn => tickets.id,
       { onDelete: 'set null' },
@@ -779,10 +805,62 @@ export const tickets = pgTable(
     index('tickets_order_idx').on(t.orderId),
     index('tickets_titular_cpf_idx').on(t.eventId, t.titularCpf),
     check('tickets_transferencias_ck', sql`${t.transferenciasCount} >= 0`),
+    check('tickets_entradas_ck', sql`${t.entradasCount} >= 0`),
+    /**
+     * Ninguém está dentro sem ter entrado — mas o vínculo é com a ENTRADA,
+     * não com o status. Reembolso ou chargeback no meio da festa cancelam o
+     * ingresso de quem já está lá dentro, e amarrar isto ao status tornaria
+     * impossível registrar a saída dessa pessoa.
+     */
+    check('tickets_dentro_ck', sql`(not ${t.dentro}) or ${t.entradasCount} > 0`),
+    index('tickets_dentro_idx').on(t.eventId).where(sql`dentro`),
     check(
       'tickets_checkin_ck',
       sql`(${t.status} <> 'usado') or (${t.checkedInEm} is not null)`,
     ),
+  ],
+);
+
+/**
+ * Livro da porta — ADR-011.
+ *
+ * As colunas de `tickets` dizem onde a pessoa está agora; esta tabela diz o
+ * caminho que ela fez. São coisas diferentes e as duas são necessárias: o
+ * estado atual decide quem passa, o histórico responde "a que horas ela saiu"
+ * quando alguém contesta na porta, e é dele que sai a curva de público da
+ * noite — a que mostra se o pico foi à meia-noite ou às duas.
+ */
+export const ticketMovimentos = pgTable(
+  'ticket_movimentos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'restrict' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'restrict' }),
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references((): AnyPgColumn => tickets.id, { onDelete: 'cascade' }),
+    tipo: movimentoTipoEnum('tipo').notNull(),
+    /** Hora do fato, não do registro: offline, as duas diferem por horas. */
+    em: timestamp('em', { withTimezone: true }).notNull().defaultNow(),
+    operadorId: uuid('operador_id').references(() => users.id, { onDelete: 'set null' }),
+    deviceId: text('device_id'),
+    /** `offline` marca o que foi decidido no aparelho e subiu depois. */
+    origem: text('origem').notNull().default('online'),
+    criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /**
+     * Chave natural do movimento. É o que torna a sincronização idempotente:
+     * o aparelho pode reenviar a mesma fila dez vezes — por rede instável ou
+     * por aba recarregada — sem duplicar ninguém no contador.
+     */
+    uniqueIndex('ticket_movimentos_dedupe_key').on(t.ticketId, t.tipo, t.em),
+    index('ticket_movimentos_event_idx').on(t.eventId, t.em),
+    index('ticket_movimentos_ticket_idx').on(t.ticketId, t.em),
   ],
 );
 
@@ -1178,6 +1256,7 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type Reservation = typeof reservations.$inferSelect;
 export type Ticket = typeof tickets.$inferSelect;
 export type NewTicket = typeof tickets.$inferInsert;
+export type TicketMovimento = typeof ticketMovimentos.$inferSelect;
 export type Payout = typeof payouts.$inferSelect;
 export type Refund = typeof refunds.$inferSelect;
 export type Chargeback = typeof chargebacks.$inferSelect;
@@ -1200,6 +1279,7 @@ export const TENANT_SCOPED_TABLES = [
   'order_items',
   'reservations',
   'tickets',
+  'ticket_movimentos',
   'payouts',
   'refunds',
   'chargebacks',

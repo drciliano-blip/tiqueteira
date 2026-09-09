@@ -43,6 +43,13 @@
       "when": 1788892147561,
       "tag": "0005_misty_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788975826085,
+      "tag": "0006_far_chat",
+      "breakpoints": true
     }
   ]
 }

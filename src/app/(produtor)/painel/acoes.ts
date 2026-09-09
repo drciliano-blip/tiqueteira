@@ -139,6 +139,8 @@ const EventoSchema = z
     classificacaoEtaria: z.coerce.number().int().min(0).max(21),
     ingressoNominal: z.coerce.boolean().optional(),
     exigeDocumentoEntrada: z.coerce.boolean().optional(),
+    controlaSaida: z.coerce.boolean().optional(),
+    permiteReentrada: z.coerce.boolean().optional(),
   })
   .refine(
     (d) => instante(d.dataFim, d.horaFim) > instante(d.dataInicio, d.horaInicio),
@@ -160,6 +162,8 @@ function lerEvento(tenantId: string, formData: FormData) {
     classificacaoEtaria: formData.get('classificacaoEtaria') ?? 18,
     ingressoNominal: formData.get('ingressoNominal') === 'on',
     exigeDocumentoEntrada: formData.get('exigeDocumentoEntrada') === 'on',
+    controlaSaida: formData.get('controlaSaida') === 'on',
+    permiteReentrada: formData.get('permiteReentrada') === 'on',
   });
 }
 
@@ -227,6 +231,8 @@ export async function criarEvento(
           classificacaoEtaria: d.classificacaoEtaria,
           ingressoNominal: d.ingressoNominal ?? true,
           exigeDocumentoEntrada: d.exigeDocumentoEntrada ?? false,
+          controlaSaida: d.controlaSaida ?? false,
+          permiteReentrada: d.permiteReentrada ?? true,
           status: 'rascunho',
         })
         .returning({ id: events.id });
@@ -307,6 +313,8 @@ export async function atualizarEvento(
           classificacaoEtaria: d.classificacaoEtaria,
           ingressoNominal: d.ingressoNominal ?? true,
           exigeDocumentoEntrada: d.exigeDocumentoEntrada ?? false,
+          controlaSaida: d.controlaSaida ?? false,
+          permiteReentrada: d.permiteReentrada ?? true,
           atualizadoEm: new Date(),
         })
         .where(eq(events.id, eventId));

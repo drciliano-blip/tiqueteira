@@ -33,6 +33,8 @@ export default async function Portaria({ params }: Props) {
       tenantId: events.tenantId,
       titulo: events.titulo,
       status: events.status,
+      controlaSaida: events.controlaSaida,
+      permiteReentrada: events.permiteReentrada,
     })
     .from(events)
     .where(eq(events.id, eventId))
@@ -72,6 +74,10 @@ export default async function Portaria({ params }: Props) {
         eventId={evento.id}
         eventoTitulo={evento.titulo}
         inicial={inicial}
+        politica={{
+          controlaSaida: evento.controlaSaida,
+          permiteReentrada: evento.permiteReentrada,
+        }}
       />
     </>
   );

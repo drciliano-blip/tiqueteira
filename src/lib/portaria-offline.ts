@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Portaria offline — plano, seções 12 e 24.
+ * Portaria offline — plano, seções 12 e 24, e ADR-011.
  *
  * O aparelho baixa o manifesto antes de abrir os portões e valida no local.
  * Isso não é conforto: a rede de casa noturna é a primeira coisa a cair
@@ -12,10 +12,20 @@
  * QR lido e procura na lista. Confere a validade sem poder gerar ingresso —
  * celular perdido não vira máquina de falsificar.
  *
+ * A decisão de deixar passar é a mesma função pura que o servidor usa
+ * (`avaliarMovimento`). Duplicar a regra aqui seria garantir que um dia as
+ * duas divergissem — e a divergência apareceria na porta, à uma da manhã.
+ *
  * Limite honesto: offline, dois portões sem comunicação entre si deixam o
  * mesmo QR passar duas vezes. Nada resolve isso do lado do aparelho. O que a
  * sincronização faz é registrar que aconteceu, para a operação saber.
  */
+import {
+  avaliarMovimento,
+  type MotivoRecusaPorta,
+  type Movimento,
+  type PoliticaPortaria,
+} from '@/domain/portaria';
 
 export type IngressoManifesto = {
   /** Hash do token. */
@@ -32,22 +42,47 @@ export type IngressoManifesto = {
   s: string;
   /** Entrada já registrada, se houver. */
   e: string | null;
+  /** Estava na casa quando o manifesto foi gerado. */
+  i: boolean;
+  /** Quantas entradas já tinha. */
+  q: number;
+  /** Última saída registrada. */
+  x: string | null;
 };
 
 export type Manifesto = {
   eventId: string;
   titulo: string;
   nominal: boolean;
+  controlaSaida: boolean;
+  permiteReentrada: boolean;
   geradoEm: string;
   total: number;
   ingressos: IngressoManifesto[];
 };
 
-export type EntradaPendente = { tokenHash: string; em: string; deviceId?: string };
+export type MovimentoPendente = {
+  tokenHash: string;
+  tipo: Movimento;
+  em: string;
+  deviceId?: string;
+};
+
+/** O que este aparelho sabe sobre cada ingresso, depois do manifesto. */
+type EstadoLocal = {
+  /** Dentro. */
+  d: boolean;
+  /** Entradas. */
+  q: number;
+  /** Última entrada. */
+  e: string | null;
+  /** Última saída. */
+  x: string | null;
+};
 
 const CHAVE_MANIFESTO = (eventId: string) => `portaria:manifesto:${eventId}`;
 const CHAVE_FILA = (eventId: string) => `portaria:fila:${eventId}`;
-const CHAVE_USADOS = (eventId: string) => `portaria:usados:${eventId}`;
+const CHAVE_ESTADO = (eventId: string) => `portaria:estado:${eventId}`;
 
 /** SHA-256 do token lido, no formato do manifesto. */
 export async function hashDoToken(token: string): Promise<string> {
@@ -101,31 +136,48 @@ export function indexar(manifesto: Manifesto): Map<string, IngressoManifesto> {
 }
 
 // ---------------------------------------------------------------------------
-// Entradas registradas no aparelho
+// O que este aparelho registrou
 // ---------------------------------------------------------------------------
 
-/** Quem este aparelho já deixou entrar, mesmo antes de sincronizar. */
-export function usadosLocais(eventId: string): Record<string, string> {
-  return ler<Record<string, string>>(CHAVE_USADOS(eventId), {});
+function estados(eventId: string): Record<string, EstadoLocal> {
+  return ler<Record<string, EstadoLocal>>(CHAVE_ESTADO(eventId), {});
 }
 
-export function registrarEntradaLocal(eventId: string, tokenHash: string, em: string): void {
-  const usados = usadosLocais(eventId);
-  // Primeira leitura vence, também no aparelho.
-  if (!usados[tokenHash]) {
-    usados[tokenHash] = em;
-    gravar(CHAVE_USADOS(eventId), usados);
-  }
+/**
+ * Estado corrente: o manifesto é o ponto de partida, e o que este aparelho
+ * registrou depois se sobrepõe. Sem a sobreposição, o segundo print do mesmo
+ * QR passaria enquanto a rede estivesse fora.
+ */
+function estadoAtual(eventId: string, ingresso: IngressoManifesto): EstadoLocal {
+  const local = estados(eventId)[ingresso.h];
+  if (local) return local;
+  return { d: ingresso.i, q: ingresso.q, e: ingresso.e, x: ingresso.x };
+}
+
+function registrarLocal(
+  eventId: string,
+  hash: string,
+  movimento: Movimento,
+  em: string,
+  anterior: EstadoLocal,
+): void {
+  const todos = estados(eventId);
+  todos[hash] =
+    movimento === 'entrada'
+      ? { d: true, q: anterior.q + 1, e: em, x: anterior.x }
+      : { d: false, q: anterior.q, e: anterior.e, x: em };
+  gravar(CHAVE_ESTADO(eventId), todos);
 
   const fila = filaPendente(eventId);
-  if (!fila.some((e) => e.tokenHash === tokenHash)) {
-    fila.push({ tokenHash, em });
+  // Chave natural: o mesmo movimento não entra duas vezes na fila.
+  if (!fila.some((m) => m.tokenHash === hash && m.tipo === movimento && m.em === em)) {
+    fila.push({ tokenHash: hash, tipo: movimento, em });
     gravar(CHAVE_FILA(eventId), fila);
   }
 }
 
-export function filaPendente(eventId: string): EntradaPendente[] {
-  return ler<EntradaPendente[]>(CHAVE_FILA(eventId), []);
+export function filaPendente(eventId: string): MovimentoPendente[] {
+  return ler<MovimentoPendente[]>(CHAVE_FILA(eventId), []);
 }
 
 export type ResultadoSincronizacao = {
@@ -135,7 +187,7 @@ export type ResultadoSincronizacao = {
 };
 
 /**
- * Envia as entradas acumuladas.
+ * Envia os movimentos acumulados.
  *
  * Só limpa a fila quando o servidor confirma. Perder uma entrada por otimismo
  * significa alguém que entrou e não aparece no contador — e é justamente o
@@ -145,21 +197,23 @@ export async function sincronizar(eventId: string): Promise<ResultadoSincronizac
   const fila = filaPendente(eventId);
   if (fila.length === 0) return { enviadas: 0, duplicados: 0, falhou: false };
 
+  const lote = fila.slice(0, 500);
+
   try {
     const resposta = await fetch(`/api/portaria/sync/${eventId}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ entradas: fila.slice(0, 500) }),
+      body: JSON.stringify({ movimentos: lote }),
     });
 
     if (!resposta.ok) return { enviadas: 0, duplicados: 0, falhou: true };
 
     const dados = (await resposta.json()) as { processadas: number; duplicados: number };
 
-    const enviados = new Set(fila.slice(0, 500).map((e) => e.tokenHash));
+    const enviados = new Set(lote.map((m) => `${m.tokenHash}:${m.tipo}:${m.em}`));
     gravar(
       CHAVE_FILA(eventId),
-      fila.filter((e) => !enviados.has(e.tokenHash)),
+      filaPendente(eventId).filter((m) => !enviados.has(`${m.tokenHash}:${m.tipo}:${m.em}`)),
     );
 
     return { enviadas: dados.processadas, duplicados: dados.duplicados, falhou: false };
@@ -179,11 +233,22 @@ export type ResultadoLocal =
       titular: string;
       cpfParcial: string | null;
       lote: string;
+      reentrada: boolean;
       exigeDocumento: boolean;
     }
-  | { situacao: 'duplicado'; codigo: string; titular: string; entrouEm: string }
-  | { situacao: 'cancelado'; codigo: string }
+  | { situacao: 'saida'; codigo: string; titular: string; entrouEm: string | null }
+  | {
+      situacao: 'recusado';
+      motivo: MotivoRecusaPorta;
+      explicacao: string;
+      codigo: string;
+      titular: string;
+    }
   | { situacao: 'desconhecido' };
+
+export function politicaDoManifesto(m: Manifesto): PoliticaPortaria {
+  return { controlaSaida: m.controlaSaida, permiteReentrada: m.permiteReentrada };
+}
 
 /**
  * Valida sem rede.
@@ -197,28 +262,48 @@ export async function validarLocalmente(
   token: string,
   manifesto: Manifesto,
   indice: Map<string, IngressoManifesto>,
+  movimento: Movimento = 'entrada',
 ): Promise<ResultadoLocal> {
   const hash = await hashDoToken(token);
   const ingresso = indice.get(hash);
 
   if (!ingresso) return { situacao: 'desconhecido' };
-  if (ingresso.s === 'cancelado' || ingresso.s === 'transferido') {
-    return { situacao: 'cancelado', codigo: ingresso.c };
-  }
 
-  const usados = usadosLocais(eventId);
-  const jaEntrou = usados[hash] ?? (ingresso.s === 'usado' ? (ingresso.e ?? '') : null);
+  const anterior = estadoAtual(eventId, ingresso);
 
-  if (jaEntrou) {
+  const decisao = avaliarMovimento({
+    movimento,
+    politica: politicaDoManifesto(manifesto),
+    estado: {
+      status: ingresso.s,
+      dentro: anterior.d,
+      entradasCount: anterior.q,
+      ultimaEntradaEm: anterior.e ? new Date(anterior.e) : null,
+      ultimaSaidaEm: anterior.x ? new Date(anterior.x) : null,
+    },
+  });
+
+  if (!decisao.permitido) {
     return {
-      situacao: 'duplicado',
+      situacao: 'recusado',
+      motivo: decisao.motivo,
+      explicacao: decisao.explicacao,
       codigo: ingresso.c,
       titular: ingresso.n,
-      entrouEm: jaEntrou,
     };
   }
 
-  registrarEntradaLocal(eventId, hash, new Date().toISOString());
+  const em = new Date().toISOString();
+  registrarLocal(eventId, hash, movimento, em, anterior);
+
+  if (movimento === 'saida') {
+    return {
+      situacao: 'saida',
+      codigo: ingresso.c,
+      titular: ingresso.n,
+      entrouEm: anterior.e,
+    };
+  }
 
   return {
     situacao: 'liberado',
@@ -226,6 +311,7 @@ export async function validarLocalmente(
     titular: ingresso.n,
     cpfParcial: ingresso.d,
     lote: ingresso.l,
+    reentrada: decisao.reentrada,
     exigeDocumento: manifesto.nominal,
   };
 }
