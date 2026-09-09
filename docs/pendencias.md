@@ -149,17 +149,57 @@ delas. A plataforma fica com parte da taxa sem assumir risco de crédito nem
 imobilizar capital.
 
 ### Carga simultânea na abertura de vendas
-Estado atual do banco (plano gratuito): **15 conexões** ao Postgres e teto de
-**200 clientes** no pooler. Serve para venda normal; **não serve** para abertura
-com milhares de pessoas ao mesmo tempo — e o sintoma seria erro de conexão na
-hora exata em que todos tentam comprar.
 
-Soluções, em ordem de custo:
+**Medido, não estimado.** O teste (`scripts/teste-de-carga.mjs`) roda contra o
+ambiente real e mede percentis, não média — a média esconde justamente a
+cauda que faz alguém desistir da compra.
+
+#### Antes da correção (08/09/2026)
+
+| Acessos simultâneos | Sucesso | p95 |
+|---|---|---|
+| 50 | 150/150 | 1575 ms |
+| 200 | 50/400 | erro 500 em 87% |
+
+A Vercel abriu alerta automático no mesmo horário: *5xx spike correlated with
+DB query failure* na busca do produtor. Três causas somadas:
+
+1. **O cache da página nunca existiu.** A página declarava `revalidate = 15`,
+   mas o cabeçalho lê o cookie de sessão — e ler cookie torna a rota inteira
+   dinâmica. O Next ignora o `revalidate` em silêncio. Toda visita ia ao banco.
+2. **Pool de 10 conexões por instância.** Em serverless cada instância atende
+   uma requisição por vez; as outras 9 ficavam só reservadas. Sob carga, 20
+   instâncias já estouram o teto de 200 clientes do pooler.
+3. **A home fazia quatro consultas por visita**, sem cache nenhum.
+
+#### Depois da correção
+
+| Acessos simultâneos | Sucesso | p95 (cache frio) | p95 (cache quente) |
+|---|---|---|---|
+| 200 | 600/600 | 2164 ms | 663 ms |
+| 500 | 1500/1500 | 2598 ms | 2475 ms |
+
+**Zero falhas em 500 acessos simultâneos.** O banco deixou de ser o gargalo: o
+que sobrou é tempo de renderização, que degrada suavemente em vez de derrubar.
+
+O que envelhece no cache é **apenas o contador de estoque**, por até 15
+segundos. Quem decide se ainda há ingresso é o `UPDATE` atômico da reserva,
+que nunca lê cache. O pior caso é ver "disponível" e receber "esgotou agora".
+
+#### Se precisar passar de 500
+
+Em ordem de custo:
 
 1. **Subir o tamanho do banco no dia da abertura.** Minutos para aplicar,
-   dezenas de dólares no mês.
-2. **Cache da página do evento.** Quem só olha não precisa tocar no banco;
-   só quem clica em comprar precisa. Derruba a carga em mais de 90%.
+   dezenas de dólares no mês. Hoje já não é o gargalo, mas volta a ser se o
+   volume de compras (não de visitas) crescer muito.
+2. **Servir a página do evento pela borda (CDN).** Hoje não dá porque o
+   cabeçalho é montado no servidor com o estado de login. Tirar o login do
+   cabeçalho e resolvê-lo no navegador tornaria a página cacheável na borda —
+   capacidade praticamente ilimitada para quem só olha. **Custo:** o botão
+   "Entrar / Painel" aparece uma fração de segundo depois do resto da página,
+   como acontece na Sympla. É troca de estética por capacidade, e é decisão
+   de produto, não técnica.
 3. **Fila virtual** (Fase 4). Em vez de 2.000 pessoas travarem o sistema, 200
    compram e as demais veem a posição na fila.
 
@@ -167,9 +207,10 @@ O **check-in não preocupa**: a portaria baixa o manifesto assinado antes de
 abrir os portões e valida no próprio aparelho. Mil pessoas entrando não geram
 mil consultas ao banco.
 
-**Ação:** incluir teste de carga na Fase 1.5, junto com o evento fantasma —
-500 compras simultâneas contra o ambiente de teste, para decidir o tamanho do
-banco com número e não com opinião.
+**Ação pendente:** o teste mede quem **abre** a página. Falta medir quem
+**compra** — 500 pedidos simultâneos disputando o mesmo lote, no ensaio geral
+da Fase 1.5. Esse caminho não é cacheável por natureza, e é onde o tamanho do
+banco volta a pesar.
 
 ---
 

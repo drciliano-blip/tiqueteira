@@ -148,11 +148,16 @@ da operadora, e promessa quebrada custa mais que atraso avisado.
 
 1. Veja o painel da Vercel: se o deploy mais recente falhou, o anterior
    continua no ar.
-2. Veja o painel do Supabase: **conexões em uso**. O plano atual tem 15
-   conexões e 200 clientes simultâneos.
-3. **Em abertura de vendas grande, suba o tamanho do banco antes.** É
-   configuração de minutos, e o sintoma de faltar é erro de conexão
-   exatamente na hora em que todo mundo tenta comprar.
+2. Veja o painel do Supabase: **conexões em uso**.
+3. **Lentidão nos primeiros segundos de uma abertura é normal.** O cache
+   começa frio: a primeira leva de acessos paga ~2s, e a partir daí cai para
+   menos de 1s. Medido: 500 acessos simultâneos, nenhuma falha.
+4. **Erro 500 em massa é outra coisa.** Se acontecer, é conexão de banco, não
+   lentidão. Suba o tamanho do banco no Supabase — configuração de minutos.
+
+**Se a Vercel mandar alerta de `5xx spike ... DB query failure`:** é este
+caso. O e-mail diz a rota e o horário; confirme em `/painel/saude` e no
+Supabase antes de mexer em qualquer coisa.
 
 ---
 
