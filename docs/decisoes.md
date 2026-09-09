@@ -384,3 +384,56 @@ recarregar a página.
 si deixam o mesmo QR passar duas vezes. Nada resolve isso do lado do aparelho.
 A sincronização registra que aconteceu; só portão único ou rede entre
 aparelhos evita o furo.
+
+---
+
+## ADR-012 — Lista de convidados e o pedido de cortesia
+
+**Data:** 2026-09-09
+**Status:** aceita
+
+**Contexto.** As tabelas `guest_lists` e `guest_list_entries` existiam no
+esquema desde a Fase 0 e nunca tiveram tela. Sem tela, a lista VIP continua no
+papel ou no WhatsApp — e é exatamente aí que o controle de portaria falha:
+ninguém confere cota, ninguém sabe quem já entrou, e o mesmo nome passa em
+dois portões.
+
+**Decisão.** A cortesia é emitida **na porta**, numa transação só: reserva o
+nome, consome o estoque, cria o pedido, emite o ingresso e registra a entrada.
+O ingresso nasce `usado` e dentro da casa.
+
+**Por que nasce usado.** A pessoa está atravessando a porta agora. Emitir um
+ingresso válido e pedir ao segurança que escaneie o QR em seguida seria
+trabalho inventado, com fila atrás.
+
+**Cortesia é pedido de valor zero, canal `lista`, método `cortesia`.** Poderia
+ser um ingresso sem pedido, e a tentação era essa. Mas ingresso sem pedido
+some de todo relatório: o produtor nunca saberia quantas cortesias deu, que é
+justamente a conta que ele quer fazer — cada cortesia é um ingresso que deixou
+de ser vendido.
+
+**Cortesia consome estoque.** A condição está no `WHERE` do `UPDATE` do lote.
+É o que impede a lista de furar a capacidade do espaço, que é limite de
+bombeiro, não de bilheteria. Quando o lote esgota, a porta recusa a cortesia e
+**devolve o nome à lista** — ele não entrou, e vai ser preciso de novo.
+
+**Consequência: `orders_comprador_ck` foi relaxado.** O CHECK exigia nome,
+e-mail e CPF de todo pedido fora de `draft`. Ele foi escrito supondo que todo
+pedido vem de um checkout — suposição falsa para os canais `lista` e `pdv`,
+que o próprio esquema já declarava. Convidado de lista não tem e-mail para
+dar, e exigir um produziria endereço inventado no banco, que é pior que campo
+vazio. O CHECK passou a exigir a identificação completa **apenas no canal
+`online`**; o nome continua obrigatório em todos os casos, porque sem ele não
+há a quem entregar o ingresso. Os invariantes de dinheiro — o split fecha com
+o total, o total é subtotal mais conveniência menos desconto — não foram
+tocados.
+
+**Convidado de `desconto` não é admitido pela porta.** Preço menor ainda é
+venda: emitir cortesia para quem deveria pagar seria furar a bilheteria pelo
+caminho mais silencioso possível. A porta mostra o nome, diz que é desconto e
+manda para a bilheteria.
+
+**A lista precisa de rede.** Diferente da leitura de QR, admitir alguém emite
+um ingresso novo, e emitir exige o segredo do servidor — que o aparelho não
+tem de propósito, para que um celular perdido não vire máquina de fabricar
+cortesia. A tela diz isso quando está sem rede, em vez de falhar em silêncio.

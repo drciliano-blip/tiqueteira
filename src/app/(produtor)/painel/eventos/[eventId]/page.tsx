@@ -178,12 +178,20 @@ export default async function EditarEvento({ params }: Props) {
           Abra este endereço no celular da portaria, no dia do evento. A leitura funciona pela
           câmera, e a busca por nome atende quem chegar sem bateria.
         </p>
-        <Link
-          href={`/portaria/${evento.id}`}
-          className="mt-4 inline-block rounded-botao border border-line-forte px-5 py-3 text-sm font-medium transition hover:border-accent hover:text-accent"
-        >
-          Abrir portaria
-        </Link>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link
+            href={`/portaria/${evento.id}`}
+            className="inline-block rounded-botao border border-line-forte px-5 py-3 text-sm font-medium transition hover:border-accent hover:text-accent"
+          >
+            Abrir portaria
+          </Link>
+          <Link
+            href={`/painel/eventos/${evento.id}/listas`}
+            className="inline-block rounded-botao border border-line-forte px-5 py-3 text-sm font-medium transition hover:border-accent hover:text-accent"
+          >
+            Listas de convidados
+          </Link>
+        </div>
       </section>
 
       {evento.status !== 'cancelado' && (

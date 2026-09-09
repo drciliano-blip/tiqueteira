@@ -16,7 +16,16 @@ import {
   type IngressoManifesto,
   type Manifesto,
 } from '@/lib/portaria-offline';
-import { buscar, contador, liberarManualmente, lerQr, marcarDocumento } from './acoes';
+import type { ConvidadoNaPorta } from '@/lib/listas';
+import {
+  admitirDaLista,
+  buscar,
+  buscarNaLista,
+  contador,
+  liberarManualmente,
+  lerQr,
+  marcarDocumento,
+} from './acoes';
 
 /**
  * Tela de portaria — benchmark, seção 5.6, e plano, seção 24.
@@ -36,11 +45,31 @@ import { buscar, contador, liberarManualmente, lerQr, marcarDocumento } from './
  * que trocou de sentido, e cada saída viraria uma recusa na cara da pessoa.
  */
 
-type Modo = 'scanner' | 'busca';
+type Modo = 'scanner' | 'busca' | 'lista';
 
 type LinhaBuscaLocal = IngressoManifesto & { id?: string };
 
-type Resultado = ResultadoCheckin | { situacao: 'desconhecido' };
+type Cortesia = { situacao: 'cortesia'; nome: string; codigo: string; listaNome: string };
+
+/**
+ * A recusa da tela é mais larga que a do servidor de propósito: a porta barra
+ * por QR e por lista, e as duas famílias de motivo terminam na mesma tela
+ * vermelha. O que a tela precisa do motivo é o título; a frase já vem pronta.
+ */
+type Recusa = {
+  situacao: 'recusado';
+  motivo: string;
+  explicacao: string;
+  codigo: string;
+  titular: string | null;
+  entrouPor: string | null;
+};
+
+type Resultado =
+  | Exclude<ResultadoCheckin, { situacao: 'recusado' }>
+  | Recusa
+  | { situacao: 'desconhecido' }
+  | Cortesia;
 
 const CORES: Record<string, string> = {
   liberado: 'bg-sucesso text-black',
@@ -52,6 +81,7 @@ const CORES: Record<string, string> = {
   outro_evento: 'bg-perigo text-white',
   invalido: 'bg-perigo text-white',
   desconhecido: 'bg-alerta text-black',
+  cortesia: 'bg-sucesso text-black',
 };
 
 const TITULO_RECUSA: Record<string, string> = {
@@ -61,6 +91,12 @@ const TITULO_RECUSA: Record<string, string> = {
   cancelado: 'Cancelado',
   transferido: 'Transferido',
   saida_nao_controlada: 'Saída desligada',
+  lista_desativada: 'Lista desativada',
+  lista_encerrada: 'Lista encerrada',
+  nao_e_cortesia: 'Não é cortesia',
+  lote_esgotado: 'Lote esgotado',
+  sem_lote: 'Lista sem lote',
+  nao_encontrado: 'Não está na lista',
 };
 
 const CHAVE_SENTIDO = (eventId: string) => `portaria:sentido:${eventId}`;
@@ -95,6 +131,9 @@ export function PainelPortaria({
 
   const [termo, setTermo] = useState('');
   const [achados, setAchados] = useState<LinhaBuscaLocal[]>([]);
+
+  const [termoLista, setTermoLista] = useState('');
+  const [convidados, setConvidados] = useState<ConvidadoNaPorta[]>([]);
 
   const [manifesto, setManifesto] = useState<Manifesto | null>(null);
   /**
@@ -348,7 +387,30 @@ export function PainelPortaria({
     return () => clearTimeout(id);
   }, [termo, eventId, manifesto]);
 
+  /**
+   * A lista só funciona com rede: admitir alguém emite um ingresso, e emitir
+   * exige o segredo do servidor — que o aparelho não tem, de propósito.
+   */
+  useEffect(() => {
+    if (modo !== 'lista' || termoLista.trim().length < 3) return;
+
+    const id = setTimeout(() => {
+      void (async () => {
+        try {
+          setConvidados(await buscarNaLista(eventId, termoLista));
+        } catch {
+          setConvidados([]);
+        }
+      })();
+    }, 300);
+
+    return () => clearTimeout(id);
+  }, [termoLista, eventId, modo]);
+
   const visiveis = termo.trim().length >= 3 ? achados : [];
+  // Derivado, não zerado por efeito: apagar o campo não pode deixar na tela o
+  // resultado da busca anterior.
+  const convidadosVisiveis = termoLista.trim().length >= 3 ? convidados : [];
 
   const situacaoVisual =
     resultado?.situacao === 'liberado' && resultado.exigeDocumento
@@ -446,7 +508,9 @@ export function PainelPortaria({
               </button>
             )}
           </>
-        ) : (
+        ) : null}
+
+        {modo === 'busca' && (
           <div className="rounded-cartao bg-white/5 p-4">
             <label htmlFor="busca-portaria" className="text-sm text-white/70">
               Nome, CPF ou código
@@ -517,6 +581,96 @@ export function PainelPortaria({
           </div>
         )}
 
+        {modo === 'lista' && (
+          <div className="rounded-cartao bg-white/5 p-4">
+            <label htmlFor="busca-lista" className="text-sm text-white/70">
+              Nome na lista de convidados
+            </label>
+            <input
+              id="busca-lista"
+              value={termoLista}
+              onChange={(e) => setTermoLista(e.target.value)}
+              autoFocus
+              placeholder="Ex.: Rafael Nunes"
+              className="mt-2 w-full rounded-botao border border-white/20 bg-black px-3 py-3 text-lg text-white placeholder:text-white/30 focus:border-white focus:outline-none"
+            />
+
+            {!online && (
+              <p className="mt-3 rounded-botao bg-alerta px-3 py-2.5 text-sm text-black">
+                A lista precisa de rede: liberar um convidado emite um ingresso novo, e isso o
+                aparelho não faz sozinho.
+              </p>
+            )}
+
+            <ul className="mt-3 divide-y divide-white/10">
+              {convidadosVisiveis.map((c) => (
+                <li key={c.id} className="flex items-center gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{c.nome}</p>
+                    <p className="truncate text-xs text-white/50">
+                      {c.listaNome}
+                      {c.promoterNome ? ` · ${c.promoterNome}` : ''}
+                      {c.tipo !== 'cortesia' ? ' · desconto' : ''}
+                      {!c.listaAtiva ? ' · lista desativada' : ''}
+                      {c.usadoEm ? ` · entrou ${hora(c.usadoEm)}` : ''}
+                    </p>
+                  </div>
+
+                  {c.usadoEm ? (
+                    <span className="shrink-0 text-xs uppercase text-white/40">já entrou</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={processando || !online}
+                      onClick={() =>
+                        iniciar(async () => {
+                          const r = await admitirDaLista(eventId, c.id);
+
+                          if (r.admitido) {
+                            contarLocalmente('entrada', false);
+                            setNumeros((n) => ({ ...n, emitidos: n.emitidos + 1 }));
+                            mostrar(
+                              {
+                                situacao: 'cortesia',
+                                nome: r.nome,
+                                codigo: r.codigo,
+                                listaNome: r.listaNome,
+                              },
+                              false,
+                            );
+                            setTermoLista('');
+                          } else {
+                            mostrar(
+                              {
+                                situacao: 'recusado',
+                                motivo: r.motivo,
+                                explicacao: r.explicacao,
+                                codigo: '',
+                                titular: r.nome,
+                                entrouPor: null,
+                              },
+                              false,
+                            );
+                          }
+                        })
+                      }
+                      className="shrink-0 rounded-botao bg-sucesso px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+                    >
+                      Liberar
+                    </button>
+                  )}
+                </li>
+              ))}
+
+              {termoLista.trim().length >= 3 && convidadosVisiveis.length === 0 && (
+                <li className="py-6 text-center text-sm text-white/50">
+                  Ninguém com esse nome nas listas deste evento.
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
+
         {erro && (
           <p role="alert" className="mt-3 rounded-botao bg-perigo px-4 py-3 text-sm">
             {erro}
@@ -524,7 +678,7 @@ export function PainelPortaria({
         )}
       </main>
 
-      <nav className="grid grid-cols-2 gap-2 border-t border-white/10 p-3">
+      <nav className="grid grid-cols-3 gap-2 border-t border-white/10 p-3">
         <button
           type="button"
           onClick={() => setModo('scanner')}
@@ -542,6 +696,15 @@ export function PainelPortaria({
           }`}
         >
           Buscar nome
+        </button>
+        <button
+          type="button"
+          onClick={() => setModo('lista')}
+          className={`rounded-botao py-3 font-semibold ${
+            modo === 'lista' ? 'bg-white text-black' : 'bg-white/10 text-white'
+          }`}
+        >
+          Lista
         </button>
       </nav>
 
@@ -629,6 +792,15 @@ export function PainelPortaria({
               <p className="mt-6 max-w-xs text-sm opacity-70">
                 Chame a supervisão se a pessoa contestar.
               </p>
+            </>
+          )}
+
+          {resultado.situacao === 'cortesia' && (
+            <>
+              <p className="text-4xl font-black uppercase">Cortesia liberada</p>
+              <p className="mt-4 text-2xl font-bold">{resultado.nome}</p>
+              <p className="mt-3 text-lg">{resultado.listaNome}</p>
+              <p className="mt-2 text-base opacity-80">{resultado.codigo}</p>
             </>
           )}
 

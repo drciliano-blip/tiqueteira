@@ -17,6 +17,12 @@ import {
   type ResultadoCheckin,
 } from '@/lib/checkin';
 import { env } from '@/lib/env';
+import {
+  admitirConvidado,
+  buscarConvidados,
+  type ConvidadoNaPorta,
+  type ResultadoAdmissao,
+} from '@/lib/listas';
 import { getAuth } from '@/lib/session-cookie';
 
 /**
@@ -92,6 +98,39 @@ export async function marcarDocumento(eventId: string, ticketId: string): Promis
 export async function buscar(eventId: string, termo: string): Promise<LinhaBusca[]> {
   const ctx = await contexto(eventId);
   return buscarIngressos(termo, ctx);
+}
+
+/**
+ * Lista de convidados na porta — ADR-012.
+ *
+ * Diferente da leitura de QR, a lista **precisa de rede**: admitir alguém
+ * emite um ingresso novo, e emitir ingresso exige o segredo do servidor. O
+ * aparelho não tem esse segredo de propósito — se tivesse, um celular perdido
+ * viraria máquina de fabricar cortesia.
+ */
+export async function buscarNaLista(
+  eventId: string,
+  termo: string,
+): Promise<ConvidadoNaPorta[]> {
+  const ctx = await contexto(eventId);
+  return buscarConvidados(termo, ctx);
+}
+
+export async function admitirDaLista(
+  eventId: string,
+  entradaId: string,
+): Promise<ResultadoAdmissao> {
+  try {
+    const ctx = await contexto(eventId);
+    return await admitirConvidado(entradaId, ctx);
+  } catch (e) {
+    return {
+      admitido: false,
+      motivo: 'nao_encontrado',
+      explicacao: e instanceof AuthError ? e.message : 'Falha ao admitir.',
+      nome: null,
+    };
+  }
 }
 
 export async function contador(eventId: string): Promise<ContadorPortaria> {

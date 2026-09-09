@@ -659,10 +659,19 @@ export const orders = pgTable(
       sql`${t.totalCentavos} = ${t.subtotalCentavos} + ${t.convenienciaCentavos} - ${t.descontoCentavos}`,
     ),
     check('orders_parcelas_ck', sql`${t.parcelas} is null or ${t.parcelas} between 1 and 12`),
+    /**
+     * Quem compra online se identifica inteiro — é o que permite reencontrar
+     * o ingresso e devolver o dinheiro. Convidado de lista e venda de
+     * bilheteria não têm e-mail para dar, e exigir um só produziria endereço
+     * inventado no banco. O nome continua obrigatório em todos os casos: sem
+     * ele não há a quem entregar o ingresso. Ver ADR-012.
+     */
     check(
       'orders_comprador_ck',
-      sql`${t.status} = 'draft' or (${t.compradorNome} is not null
-          and ${t.compradorEmail} is not null and ${t.compradorCpf} is not null)`,
+      sql`${t.status} = 'draft'
+          or (${t.canal} <> 'online' and ${t.compradorNome} is not null)
+          or (${t.compradorNome} is not null
+              and ${t.compradorEmail} is not null and ${t.compradorCpf} is not null)`,
     ),
     // Venda de PDV não tem transação na PSP; venda online não tem método externo.
     check(
