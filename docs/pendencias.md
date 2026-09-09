@@ -214,6 +214,22 @@ banco volta a pesar.
 
 ---
 
+## Ensaio geral — depende de gente, não de código
+
+O evento fantasma da Fase 1.5 está pronto para ser rodado. `pnpm ensaio` monta
+um evento fictício com 50 ingressos emitidos, uma lista de convidados e uma
+folha de QRs para imprimir; `docs/ensaio.md` é o roteiro do que testar.
+
+Não dá para eu fazer esta parte: ela depende de celular velho, luz apagada,
+papel amassado e três pessoas numa sala. É exatamente por isso que ela encontra
+o que teste automatizado não encontra.
+
+**O que ela precisa de você:** duas horas, dois celulares diferentes, a folha
+impressa e recortada, e alguém anotando. O resultado é a lista de problemas no
+fim de `docs/ensaio.md` — e é essa lista que vira o próximo commit.
+
+---
+
 ## Bloqueiam go-live (não bloqueiam código)
 
 ### 5. Cinco decisões de negócio (plano, seção 1)
