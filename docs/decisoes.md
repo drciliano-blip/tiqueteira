@@ -437,3 +437,73 @@ manda para a bilheteria.
 um ingresso novo, e emitir exige o segredo do servidor — que o aparelho não
 tem de propósito, para que um celular perdido não vire máquina de fabricar
 cortesia. A tela diz isso quando está sem rede, em vez de falhar em silêncio.
+
+---
+
+## ADR-013 — O cadeado do lote e o tempo da fila
+
+**Data:** 2026-09-09
+**Status:** aceita
+
+**Contexto.** A pergunta era direta: o sistema aguenta um festival de 5 a 10
+mil pessoas, e três eventos abrindo venda no mesmo horário? Não dava para
+responder com opinião, então virou `src/db/bench.ts` — que mede os dois
+caminhos que **não são cacheáveis por natureza**: quem compra e quem passa
+pela porta.
+
+**O que a medição mostrou.** Com 500 compras simultâneas disputando o mesmo
+lote, a taxa era de **5 reservas por segundo**, com p50 de 82 segundos. Não
+era falta de conexão nem falta de CPU: nenhuma requisição falhou, e o estoque
+fechou exato (200 vendidos para 200 disponíveis). Era **espera**.
+
+A causa: o `UPDATE` que decrementa o lote tranca aquela linha, e o Postgres só
+solta a tranca no `COMMIT`. Entre um e outro havia mais duas idas ao banco — o
+`INSERT` da reserva e o próprio `COMMIT`. **Toda a fila espera por essas idas**,
+porque todo mundo quer a mesma linha. A linha do lote é um ponto de
+serialização global, e o que a serializa não é trabalho de banco: é latência
+de rede multiplicada pelo tamanho da fila.
+
+**Decisão 1 — o mínimo de idas ao banco com a tranca na mão.**
+
+- A reserva virou **um comando só**: o `INSERT` em `reservations` mora dentro
+  de um CTE junto do `UPDATE` do lote. Duas idas seguradas viraram uma.
+- O check-in virou **um comando só**: `UPDATE` do ingresso, `INSERT` no livro
+  da porta e o nome do lote saem juntos. Quatro idas por pessoa viraram duas.
+- A sincronização offline virou **dois comandos para o lote inteiro**, em vez
+  de três por movimento.
+
+**Medido, na mesma máquina e no mesmo banco:**
+
+| Caminho | Antes | Depois |
+|---|---|---|
+| 500 compras no mesmo lote | 5/s, p50 82 s | 11/s, p50 31 s |
+| Check-in, uma leitura | p50 982 ms | p50 742 ms |
+| 200 leituras simultâneas | 16/s, p95 12,0 s | 22/s, p95 8,7 s |
+| Subir 300 passagens offline | ~3 idas × 300 | 2,4 s no total |
+
+**Decisão 2 — a porta não depende do banco.** A validação offline foi medida
+em **5 µs por leitura** contra um manifesto de 5.000 ingressos, sem tocar no
+banco. É três ordens de grandeza mais rápida que a leitura online, e é a razão
+de a portaria de um festival ser um problema resolvido enquanto a abertura de
+vendas não é. **Recomendação operacional: em evento grande, a portaria opera
+com o manifesto baixado, não online.**
+
+**O que continua sendo o teto, e não se resolve com código.** Depois da
+correção, o que sobra na fila de compra é latência de rede vezes o número de
+pessoas esperando pela mesma linha. Dois caminhos, nesta ordem:
+
+1. **Banco no mesmo continente.** O banco de desenvolvimento está em
+   `us-east-1`, a uns 120 ms daqui. Produção nasce em `sa-east-1` (ADR-009),
+   com ida e volta de 10 a 20 ms. Como o tempo de tranca é dominado por essa
+   volta, a expectativa é de **5 a 10 vezes** mais vazão no mesmo código —
+   algo entre 60 e 100 reservas por segundo por lote. **Precisa ser medido lá,
+   não estimado.**
+2. **Fila virtual** (Fase 4, já no plano). Acima disso, o caminho não é fazer
+   a fila andar mais rápido: é não deixar todo mundo entrar na fila ao mesmo
+   tempo.
+
+**O que NÃO mudou, de propósito.** A correção do estoque continua sendo a
+mesma: `UPDATE` condicional, sem leitura prévia. O teste de 50 compras
+simultâneas para 10 ingressos continua verde, e a medição de 500 para 200
+vendeu exatamente 200. Ganhar vazão à custa de vender ingresso a mais seria
+troca ruim em qualquer velocidade.

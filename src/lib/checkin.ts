@@ -16,7 +16,7 @@ import 'server-only';
 import { and, eq, ilike, or, sql } from 'drizzle-orm';
 
 import { serviceDb, withTenant } from '@/db/client';
-import { events, tickets, ticketTypes, users } from '@/db/schema';
+import { events, tickets, users } from '@/db/schema';
 import { normalizarCpf } from '@/domain/cpf';
 import {
   avaliarMovimento,
@@ -123,30 +123,6 @@ type LinhaSaida = {
 
 type Tx = Parameters<Parameters<typeof withTenant>[1]>[0];
 
-/**
- * Registra a passagem no livro da porta.
- *
- * `on conflict do nothing` sobre a chave natural (ingresso, tipo, hora): a
- * fila offline pode ser reenviada quantas vezes for preciso sem inflar o
- * histórico nem a curva de público.
- */
-async function anotarMovimento(
-  tx: Tx,
-  ctx: ContextoPortaria,
-  ticketId: string,
-  tipo: Movimento,
-  em: string,
-  origem: 'online' | 'offline' = 'online',
-): Promise<void> {
-  await tx.execute(sql`
-    insert into ticket_movimentos
-      (tenant_id, event_id, ticket_id, tipo, em, operador_id, device_id, origem)
-    values (${ctx.tenantId}, ${ctx.eventId}, ${ticketId}, ${tipo}, ${em}::timestamptz,
-            ${ctx.userId}, ${ctx.deviceId ?? null}, ${origem})
-    on conflict do nothing
-  `);
-}
-
 /** Descobre por que a passagem não aconteceu, para a tela ter o que dizer. */
 async function explicarRecusa(
   tx: Tx,
@@ -228,21 +204,6 @@ async function explicarRecusa(
   };
 }
 
-async function detalhe(
-  tx: Tx,
-  eventId: string,
-  ticketTypeId: string,
-): Promise<{ lote: string; nominal: boolean }> {
-  const [d] = await tx
-    .select({ lote: ticketTypes.nome, nominal: events.ingressoNominal })
-    .from(ticketTypes)
-    .innerJoin(events, eq(events.id, eventId))
-    .where(eq(ticketTypes.id, ticketTypeId))
-    .limit(1);
-
-  return { lote: d?.lote ?? '—', nominal: d?.nominal ?? false };
-}
-
 /**
  * Lê o QR e registra a passagem no sentido pedido.
  *
@@ -295,20 +256,29 @@ async function passar(
      * o Postgres decide — a segunda vira recusa explicada, não saída dupla.
      */
     const linhas = (await tx.execute(sql`
-      update tickets
-         set dentro = false,
-             ultima_saida_em = now(),
-             atualizado_em = now()
-       where ${alvo}
-         and event_id = ${ctx.eventId}
-         and dentro = true
-      returning id, codigo, titular_nome, ultima_entrada_em, ultima_saida_em
+      with saiu as (
+        update tickets
+           set dentro = false,
+               ultima_saida_em = now(),
+               atualizado_em = now()
+         where ${alvo}
+           and event_id = ${ctx.eventId}
+           and dentro = true
+        returning id, codigo, titular_nome, ultima_entrada_em, ultima_saida_em
+      ),
+      anotado as (
+        insert into ticket_movimentos
+          (tenant_id, event_id, ticket_id, tipo, em, operador_id, device_id, origem)
+        select ${ctx.tenantId}, ${ctx.eventId}, s.id, 'saida', s.ultima_saida_em,
+               ${ctx.userId}, ${ctx.deviceId ?? null}, 'online'
+          from saiu s
+        on conflict do nothing
+      )
+      select * from saiu
     `)) as unknown as LinhaSaida[];
 
     const t = linhas[0];
     if (!t) return explicarRecusa(tx, ctx, movimento, onde);
-
-    await anotarMovimento(tx, ctx, t.id, 'saida', t.ultima_saida_em);
 
     return {
       situacao: 'saida',
@@ -331,32 +301,50 @@ async function passar(
    */
   const podeReentrar = ctx.politica.controlaSaida && ctx.politica.permiteReentrada;
 
+  /**
+   * Tudo num comando só: a passagem, o registro no livro e o nome do lote.
+   *
+   * A razão é o tempo da fila. Cada ida ao banco custa uma volta de rede, e
+   * com fila na porta o que o segurança sente é a soma delas. Eram quatro
+   * idas por pessoa; são duas. O que sobra é latência de rede, e essa se
+   * resolve pondo o banco no mesmo continente — não com código.
+   */
   const linhas = (await tx.execute(sql`
-    update tickets
-       set status = 'usado',
-           dentro = true,
-           checked_in_em = coalesce(checked_in_em, now()),
-           checked_in_by = coalesce(checked_in_by, ${ctx.userId}),
-           checked_in_device_id = coalesce(checked_in_device_id, ${ctx.deviceId ?? null}),
-           ultima_entrada_em = now(),
-           entradas_count = entradas_count + 1,
-           atualizado_em = now()
-     where ${alvo}
-       and event_id = ${ctx.eventId}
-       and (
-         status = 'valido'
-         or (${podeReentrar} and status = 'usado' and dentro = false)
-       )
-    returning id, codigo, titular_nome, titular_cpf, ticket_type_id,
-              entradas_count, ultima_entrada_em
-  `)) as unknown as LinhaEntrada[];
+    with passou as (
+      update tickets
+         set status = 'usado',
+             dentro = true,
+             checked_in_em = coalesce(checked_in_em, now()),
+             checked_in_by = coalesce(checked_in_by, ${ctx.userId}),
+             checked_in_device_id = coalesce(checked_in_device_id, ${ctx.deviceId ?? null}),
+             ultima_entrada_em = now(),
+             entradas_count = entradas_count + 1,
+             atualizado_em = now()
+       where ${alvo}
+         and event_id = ${ctx.eventId}
+         and (
+           status = 'valido'
+           or (${podeReentrar} and status = 'usado' and dentro = false)
+         )
+      returning id, codigo, titular_nome, titular_cpf, ticket_type_id,
+                entradas_count, ultima_entrada_em
+    ),
+    anotado as (
+      insert into ticket_movimentos
+        (tenant_id, event_id, ticket_id, tipo, em, operador_id, device_id, origem)
+      select ${ctx.tenantId}, ${ctx.eventId}, p.id, 'entrada', p.ultima_entrada_em,
+             ${ctx.userId}, ${ctx.deviceId ?? null}, 'online'
+        from passou p
+      on conflict do nothing
+    )
+    select p.id, p.codigo, p.titular_nome, p.titular_cpf, p.ticket_type_id,
+           p.entradas_count, p.ultima_entrada_em, tt.nome as lote
+      from passou p
+      join ticket_types tt on tt.id = p.ticket_type_id
+  `)) as unknown as (LinhaEntrada & { lote: string })[];
 
   const t = linhas[0];
   if (!t) return explicarRecusa(tx, ctx, movimento, onde);
-
-  await anotarMovimento(tx, ctx, t.id, 'entrada', t.ultima_entrada_em);
-
-  const d = await detalhe(tx, ctx.eventId, t.ticket_type_id);
 
   return {
     situacao: 'liberado',
@@ -364,9 +352,11 @@ async function passar(
     codigo: t.codigo,
     titular: t.titular_nome,
     titularCpf: t.titular_cpf,
-    lote: d.lote,
+    lote: t.lote ?? '—',
     reentrada: Number(t.entradas_count) > 1,
-    exigeDocumento: d.nominal,
+    // A política do evento já veio no contexto: perguntar de novo ao banco
+    // custaria outra volta de rede por pessoa.
+    exigeDocumento: ctx.nominal,
   };
 }
 

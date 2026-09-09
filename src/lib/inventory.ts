@@ -61,23 +61,42 @@ export async function reservarEstoque(
     /**
      * O coração de tudo. Sem leitura prévia, sem race condition.
      *
-     * Se a linha não voltar, uma de duas: acabou o estoque, ou o tipo está
+     * O `INSERT` da reserva vive DENTRO do mesmo comando, num CTE, e a razão é
+     * de capacidade, não de elegância. O `UPDATE` tranca a linha do lote, e o
+     * Postgres só solta a tranca no `COMMIT`. Enquanto ela está presa, todo
+     * mundo que quer o mesmo lote espera — então cada ida ao banco entre o
+     * `UPDATE` e o `COMMIT` é somada à espera de TODA a fila.
+     *
+     * Com o `INSERT` separado eram duas idas seguradas; com o CTE é uma. Numa
+     * abertura de venda de festival isso é a diferença entre a fila andar e a
+     * fila estourar o tempo limite. Medido em `src/db/bench.ts`.
+     *
+     * Se nada voltar, uma de duas: acabou o estoque, ou o tipo está
      * inativo/fora da janela. A segunda consulta distingue os dois casos
      * apenas para dar mensagem decente ao comprador — ela não participa da
-     * decisão, que já foi tomada de forma atômica acima.
+     * decisão, que já foi tomada de forma atômica acima. E ela só acontece no
+     * caminho da RECUSA, onde não há tranca alguma para segurar.
      */
     const reservadas = await linhas<{ id: string }>(
       exec,
       sql`
-        update ticket_types
-           set quantidade_reservada = quantidade_reservada + ${item.quantidade},
-               atualizado_em = now()
-         where id = ${item.ticketTypeId}
-           and tenant_id = ${params.tenantId}
-           and ativo = true
-           and now() between vendas_inicio and vendas_fim
-           and quantidade_vendida + quantidade_reservada + ${item.quantidade}
-               <= quantidade_total
+        with reservado as (
+          update ticket_types
+             set quantidade_reservada = quantidade_reservada + ${item.quantidade},
+                 atualizado_em = now()
+           where id = ${item.ticketTypeId}
+             and tenant_id = ${params.tenantId}
+             and ativo = true
+             and now() between vendas_inicio and vendas_fim
+             and quantidade_vendida + quantidade_reservada + ${item.quantidade}
+                 <= quantidade_total
+          returning id
+        )
+        insert into reservations
+          (tenant_id, ticket_type_id, order_id, quantidade, expires_em)
+        select ${params.tenantId}, id, ${params.orderId}, ${item.quantidade},
+               ${expiresEm.toISOString()}::timestamptz
+          from reservado
         returning id
       `,
     );
@@ -99,13 +118,6 @@ export async function reservarEstoque(
       };
     }
 
-    // ISO string, não Date: neste caminho de execução o driver não serializa
-    // objeto Date e falha com ERR_INVALID_ARG_TYPE.
-    await exec.execute(sql`
-      insert into reservations (tenant_id, ticket_type_id, order_id, quantidade, expires_em)
-      values (${params.tenantId}, ${item.ticketTypeId}, ${params.orderId},
-              ${item.quantidade}, ${expiresEm.toISOString()}::timestamptz)
-    `);
   }
 
   return { ok: true, expiresEm };

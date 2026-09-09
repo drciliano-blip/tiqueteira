@@ -19,10 +19,12 @@ import postgres from 'postgres';
 
 import {
   contarPresentes,
+  hashDeToken,
   liberarPorId,
   validarIngresso,
   type ContextoPortaria,
 } from '@/lib/checkin';
+import { sincronizarMovimentos } from '@/lib/portaria-sync';
 import { emitirTicket } from '@/lib/tickets';
 
 const DIRECT_URL = process.env.DIRECT_URL;
@@ -358,4 +360,110 @@ describe('contador da casa', () => {
     expect((await liberarPorId(ingresso.id, ctx, 'saida')).situacao).toBe('saida');
     expect(await movimentosDe(ingresso.id)).toEqual(['entrada', 'saida']);
   });
+});
+
+describe('sincronização da fila offline', () => {
+  const hs = (token: string) => hashDeToken(token);
+
+  it('sobe a fila e o estado converge', async () => {
+    const eventId = await criarEvento({ controlaSaida: true, permiteReentrada: true });
+    const ingresso = await criarIngresso(eventId);
+
+    const r = await sincronizarMovimentos(
+      { tenantId, eventId, userId },
+      [
+        { tokenHash: hs(ingresso.token), tipo: 'entrada', em: '2026-09-10T01:00:00.000Z' },
+        { tokenHash: hs(ingresso.token), tipo: 'saida', em: '2026-09-10T02:30:00.000Z' },
+      ],
+    );
+
+    expect(r).toEqual({ processadas: 2, duplicados: 0, invalidos: 0 });
+
+    const estado = await estadoDe(ingresso.id);
+    expect(estado).toMatchObject({ status: 'usado', dentro: false, entradas_count: 1 });
+  });
+
+  it('reenviar a mesma fila não duplica ninguém no contador', async () => {
+    // Rede instável e aba recarregada fazem isso acontecer o tempo todo.
+    const eventId = await criarEvento({ controlaSaida: true, permiteReentrada: true });
+    const ingresso = await criarIngresso(eventId);
+
+    const fila = [
+      { tokenHash: hs(ingresso.token), tipo: 'entrada' as const, em: '2026-09-10T01:00:00.000Z' },
+    ];
+
+    expect((await sincronizarMovimentos({ tenantId, eventId, userId }, fila)).processadas).toBe(1);
+
+    const segunda = await sincronizarMovimentos({ tenantId, eventId, userId }, fila);
+    expect(segunda).toEqual({ processadas: 0, duplicados: 1, invalidos: 0 });
+
+    expect((await estadoDe(ingresso.id)).entradas_count).toBe(1);
+    expect(await movimentosDe(ingresso.id)).toEqual(['entrada']);
+  });
+
+  it('fila que chega fora de ordem converge para o mesmo estado', async () => {
+    /**
+     * Dois portões, um deles sem rede por horas. O aparelho que registrou a
+     * SAÍDA sobe primeiro; o que registrou a ENTRADA sobe depois. Se o estado
+     * fosse incrementado na ordem de chegada, esta pessoa terminaria a noite
+     * marcada como dentro da casa — e o contador nunca fecharia.
+     */
+    const eventId = await criarEvento({ controlaSaida: true, permiteReentrada: true });
+    const ingresso = await criarIngresso(eventId);
+
+    await sincronizarMovimentos({ tenantId, eventId, userId }, [
+      { tokenHash: hs(ingresso.token), tipo: 'saida', em: '2026-09-10T02:30:00.000Z' },
+    ]);
+
+    await sincronizarMovimentos({ tenantId, eventId, userId }, [
+      { tokenHash: hs(ingresso.token), tipo: 'entrada', em: '2026-09-10T01:00:00.000Z' },
+    ]);
+
+    const estado = await estadoDe(ingresso.id);
+    expect(estado.dentro).toBe(false);
+    expect(estado.entradas_count).toBe(1);
+  });
+
+  it('QR de outro evento sobe como inválido, sem sujar o livro', async () => {
+    const casa = await criarEvento({ controlaSaida: true, permiteReentrada: true });
+    const outra = await criarEvento({ controlaSaida: true, permiteReentrada: true });
+    const forasteiro = await criarIngresso(outra);
+
+    const r = await sincronizarMovimentos({ tenantId, eventId: casa, userId }, [
+      { tokenHash: hs(forasteiro.token), tipo: 'entrada', em: '2026-09-10T01:00:00.000Z' },
+    ]);
+
+    expect(r).toEqual({ processadas: 0, duplicados: 0, invalidos: 1 });
+    expect(await movimentosDe(forasteiro.id)).toEqual([]);
+  });
+
+  it('um lote de 300 passagens sobe de uma vez', async () => {
+    /**
+     * O aparelho que passou a noite offline sobe centenas de uma vez. O custo
+     * disto é praticamente o mesmo de subir uma: são dois comandos, não dois
+     * por movimento. Sem isso, a subida seguraria a conexão por minutos —
+     * justamente quando os outros portões precisam dela.
+     */
+    const eventId = await criarEvento({ controlaSaida: true, permiteReentrada: true });
+
+    const pessoas = [];
+    for (let i = 0; i < 300; i++) pessoas.push(await criarIngresso(eventId, `Fila ${i}`));
+
+    const fila = pessoas.map((p, i) => ({
+      tokenHash: hs(p.token),
+      tipo: 'entrada' as const,
+      em: new Date(Date.UTC(2026, 8, 10, 1, 0, i % 60)).toISOString(),
+    }));
+
+    const inicio = Date.now();
+    const r = await sincronizarMovimentos({ tenantId, eventId, userId }, fila);
+    const duracao = Date.now() - inicio;
+
+    expect(r.processadas).toBe(300);
+    expect(await contarPresentes(tenantId, eventId)).toMatchObject({ dentro: 300, entraram: 300 });
+
+    // Generoso de propósito: o que se protege aqui é a ORDEM de grandeza.
+    // Uma ida ao banco por movimento levaria minutos.
+    expect(duracao).toBeLessThan(30_000);
+  }, 120_000);
 });

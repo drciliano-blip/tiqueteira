@@ -207,10 +207,36 @@ O **check-in não preocupa**: a portaria baixa o manifesto assinado antes de
 abrir os portões e valida no próprio aparelho. Mil pessoas entrando não geram
 mil consultas ao banco.
 
-**Ação pendente:** o teste mede quem **abre** a página. Falta medir quem
-**compra** — 500 pedidos simultâneos disputando o mesmo lote, no ensaio geral
-da Fase 1.5. Esse caminho não é cacheável por natureza, e é onde o tamanho do
-banco volta a pesar.
+#### Quem compra e quem passa pela porta (09/09/2026)
+
+Medido com `pnpm bench`, que existe para responder "aguenta 5 mil pessoas?"
+com número. Ver ADR-013.
+
+| Caminho | Antes | Depois da correção |
+|---|---|---|
+| 500 compras no mesmo lote | 5/s, p50 82 s | **11/s, p50 31 s** |
+| Check-in online, uma leitura | p50 982 ms | **p50 742 ms** |
+| 200 leituras simultâneas | 16/s, p95 12,0 s | **22/s, p95 8,7 s** |
+| Subir 300 passagens offline | ~900 idas ao banco | **2,4 s no total** |
+| Validação offline, no aparelho | — | **5 µs, 215 mil/s** |
+| Manifesto de 5.000 ingressos | — | **220 KB, ~1,8 s em 1 Mbps** |
+
+Em todas as rodadas o estoque fechou exato: 500 compras simultâneas disputando
+200 ingressos venderam **exatamente 200**, sem uma falha de conexão.
+
+**A porta de evento grande é um problema resolvido**, desde que opere com o
+manifesto baixado: a validação acontece no aparelho, três ordens de grandeza
+mais rápida que a leitura online, e não depende da rede da casa.
+
+**A abertura de vendas é o que ainda tem teto.** O que sobra na fila é
+latência de rede multiplicada pelo número de pessoas esperando pela mesma
+linha do lote.
+
+**Ação pendente:** repetir `pnpm bench` **contra o banco de produção em
+`sa-east-1`**, quando ele existir. A ida e volta cai de ~120 ms para 10–20 ms,
+e como a espera é dominada por ela, a expectativa é de 5 a 10 vezes mais
+vazão — algo entre 60 e 100 reservas por segundo por lote. **É expectativa,
+não medição.** Enquanto não for medido lá, o número que vale é o desta tabela.
 
 ---
 
