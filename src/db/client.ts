@@ -25,11 +25,26 @@ export type Database = PostgresJsDatabase<typeof schema>;
  * `prepare: false` é obrigatório atrás do pooler do Supabase em modo
  * transação (porta 6543): prepared statements não sobrevivem à troca de
  * conexão do pooler.
+ *
+ * `max: 1` em produção não é economia — é aritmética de serverless.
+ *
+ * Cada instância da Vercel atende UMA requisição por vez. Um pool de 10 por
+ * instância nunca usa as outras 9; só as reserva. Sob carga, a Vercel abre
+ * dezenas de instâncias ao mesmo tempo, e cada uma tenta reservar 10: vinte
+ * instâncias já estouram o teto de 200 clientes do pooler, e a instância 21
+ * recebe recusa de conexão. Foi exatamente isso que o teste de 200 acessos
+ * produziu — erro 500 na busca do tenant, não lentidão.
+ *
+ * Com 1 por instância, o número de conexões passa a ser o número de
+ * requisições simultâneas de verdade, que é o que o pooler sabe enfileirar.
+ *
+ * Os jobs em segundo plano são a exceção: rodam sozinhos, em lote, e ganham
+ * de verdade com paralelismo.
  */
-function connect(url: string) {
+function connect(url: string, { pool = 1 }: { pool?: number } = {}) {
   return postgres(url, {
     prepare: false,
-    max: process.env.NODE_ENV === 'production' ? 10 : 3,
+    max: process.env.NODE_ENV === 'production' ? pool : 3,
     idle_timeout: 20,
     connect_timeout: 10,
   });
@@ -46,7 +61,9 @@ export function appDb(): Database {
 export function serviceDb(): Database {
   if (!_serviceDb) {
     const url = env().SERVICE_DATABASE_URL ?? env().DATABASE_URL;
-    _serviceDb = drizzle(connect(url), { schema });
+    // 2 porque por aqui passam os jobs em lote e o webhook, que às vezes
+    // encavalam. Continua baixo o bastante para não competir com a venda.
+    _serviceDb = drizzle(connect(url, { pool: 2 }), { schema });
   }
   return _serviceDb;
 }

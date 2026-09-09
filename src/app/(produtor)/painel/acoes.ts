@@ -9,6 +9,7 @@ import { serviceDb, withTenant } from '@/db/client';
 import { auditLog, events, ticketTypes, venues } from '@/db/schema';
 import { excedeCapacidade, excedeCotaMeia } from '@/domain/inventory';
 import { AuthError, requireRole } from '@/lib/auth';
+import { invalidarCachePublico } from '@/lib/cache-publico';
 import { enfileirar } from '@/lib/jobs';
 import { reaisParaCentavos } from '@/lib/money';
 import { getAuth } from '@/lib/session-cookie';
@@ -103,6 +104,8 @@ export async function criarEspaco(
     });
   });
 
+  // O nome e a cidade do espaço aparecem na página pública do evento.
+  invalidarCachePublico(tenantId);
   revalidatePath('/painel/espacos');
   return { ok: true };
 }
@@ -235,6 +238,7 @@ export async function criarEvento(
     return { erro: e instanceof Error ? e.message : 'Não foi possível criar o evento.' };
   }
 
+  invalidarCachePublico(tenantId);
   revalidatePath('/painel');
   redirect(`/painel/eventos/${eventId}`);
 }
@@ -311,6 +315,7 @@ export async function atualizarEvento(
     return { erro: e instanceof Error ? e.message : 'Não foi possível salvar.' };
   }
 
+  invalidarCachePublico(tenantId);
   revalidatePath(`/painel/eventos/${eventId}`);
   revalidatePath('/painel');
   return { ok: true };
@@ -353,6 +358,7 @@ export async function mudarStatusDoEvento(
     return { erro: e instanceof Error ? e.message : 'Não foi possível mudar a situação.' };
   }
 
+  invalidarCachePublico(tenantId);
   revalidatePath(`/painel/eventos/${eventId}`);
   revalidatePath('/painel');
   return { ok: true };
@@ -521,6 +527,7 @@ export async function salvarLote(
     return { erro: e instanceof Error ? e.message : 'Não foi possível salvar o lote.' };
   }
 
+  invalidarCachePublico(tenantId);
   revalidatePath(`/painel/eventos/${eventId}`);
   return { ok: true };
 }
@@ -540,6 +547,7 @@ export async function alternarLote(
       .where(and(eq(ticketTypes.id, ticketTypeId), eq(ticketTypes.eventId, eventId)));
   });
 
+  invalidarCachePublico(tenantId);
   revalidatePath(`/painel/eventos/${eventId}`);
 }
 
@@ -629,6 +637,7 @@ export async function cancelarEvento(
     dedupeKey: `cancelamento:${eventId}`,
   });
 
+  invalidarCachePublico(tenantId);
   revalidatePath(`/painel/eventos/${eventId}`);
   revalidatePath('/painel');
   return { ok: true };

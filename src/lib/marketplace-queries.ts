@@ -13,10 +13,30 @@
 import 'server-only';
 
 import { and, asc, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
+import { unstable_cache } from 'next/cache';
 
 import { serviceDb } from '@/db/client';
 import { events, orders, tenants, ticketTypes, venues } from '@/db/schema';
 import { CATEGORIAS, type Categoria } from '@/domain/categorias';
+import { ETIQUETA_VITRINE } from '@/lib/cache-publico';
+
+/**
+ * A home é a página mais visitada e faz quatro consultas por visita. Sem
+ * cache, ela sozinha come as conexões do banco numa divulgação — e aí a
+ * página do evento, que é onde se compra, fica sem conexão sobrando.
+ */
+const CACHE_VITRINE_SEGUNDOS = 30;
+const CACHE_CIDADES_SEGUNDOS = 300;
+
+/**
+ * O cache guarda JSON, e `Date` volta como texto. Em vez de confiar que
+ * ninguém vai esquecer, o tipo cacheado declara isso.
+ */
+type EventoVitrineBruto = Omit<EventoVitrine, 'dataInicio'> & { dataInicio: string };
+
+function reviverDatas(linhas: EventoVitrineBruto[]): EventoVitrine[] {
+  return linhas.map((l) => ({ ...l, dataInicio: new Date(l.dataInicio) }));
+}
 
 export { CATEGORIAS };
 export type { Categoria };
@@ -48,6 +68,32 @@ type Filtros = {
 };
 
 export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<EventoVitrine[]> {
+  const termo = filtros.busca?.trim();
+
+  /**
+   * Busca digitada não passa pelo cache de propósito: cada termo é uma chave
+   * diferente, então cachear texto livre enche o cache de entradas que nunca
+   * se repetem. E busca é rara comparada a "abrir a home" — quem digita são
+   * dezenas por hora, não milhares por minuto.
+   */
+  if (termo && termo.length >= 2) {
+    return reviverDatas(await carregarEventosDaPlataforma(filtros));
+  }
+
+  const chave = [filtros.cidade ?? '', filtros.categoria ?? '', String(filtros.limite ?? '')];
+
+  return reviverDatas(
+    await unstable_cache(
+      () => carregarEventosDaPlataforma(filtros),
+      ['vitrine', ...chave],
+      { revalidate: CACHE_VITRINE_SEGUNDOS, tags: [ETIQUETA_VITRINE] },
+    )(),
+  );
+}
+
+async function carregarEventosDaPlataforma(
+  filtros: Filtros = {},
+): Promise<EventoVitrineBruto[]> {
   const db = serviceDb();
   const termo = filtros.busca?.trim();
 
@@ -131,6 +177,7 @@ export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<
 
   return linhas.map((l) => ({
     ...l,
+    dataInicio: l.dataInicio.toISOString(),
     precoMinimoCentavos: minimoPorEvento.get(l.id) ?? null,
   }));
 }
@@ -142,27 +189,37 @@ export async function listarEventosDaPlataforma(filtros: Filtros = {}): Promise<
  * disfarçada de "destaque". Se ninguém comprou, a seção não aparece.
  */
 export async function listarMaisVendidos(limite = 8): Promise<EventoVitrine[]> {
-  const db = serviceDb();
+  /**
+   * O ranking é a consulta mais cara da home: varre pedidos das últimas 24h e
+   * agrupa. Cachear é seguro porque o número não é usado para decidir nada —
+   * é ordem de exibição. Ninguém repara que "mais vendidos" está 30 segundos
+   * atrás.
+   */
+  const ids = await unstable_cache(
+    async () => {
+      const ranking = await serviceDb()
+        .select({
+          eventId: orders.eventId,
+          pedidos: sql<number>`count(*)`,
+        })
+        .from(orders)
+        .where(
+          and(
+            inArray(orders.status, ['paid', 'partially_refunded']),
+            sql`${orders.pagoEm} >= now() - interval '24 hours'`,
+          ),
+        )
+        .groupBy(orders.eventId)
+        .orderBy(sql`count(*) desc`)
+        .limit(limite);
 
-  const ranking = await db
-    .select({
-      eventId: orders.eventId,
-      pedidos: sql<number>`count(*)`,
-    })
-    .from(orders)
-    .where(
-      and(
-        inArray(orders.status, ['paid', 'partially_refunded']),
-        sql`${orders.pagoEm} >= now() - interval '24 hours'`,
-      ),
-    )
-    .groupBy(orders.eventId)
-    .orderBy(sql`count(*) desc`)
-    .limit(limite);
+      return ranking.map((r) => r.eventId);
+    },
+    ['mais-vendidos', String(limite)],
+    { revalidate: CACHE_VITRINE_SEGUNDOS, tags: [ETIQUETA_VITRINE] },
+  )();
 
-  if (ranking.length === 0) return [];
-
-  const ids = ranking.map((r) => r.eventId);
+  if (ids.length === 0) return [];
   const eventos = await listarEventosDaPlataforma({ limite: 60 });
 
   // Preserva a ordem do ranking; eventos já encerrados somem naturalmente,
@@ -173,6 +230,15 @@ export async function listarMaisVendidos(limite = 8): Promise<EventoVitrine[]> {
 
 /** Cidades com evento à venda, para o filtro da home. */
 export async function listarCidades(): Promise<string[]> {
+  // Cinco minutos: a lista de cidades só muda quando um produtor novo cadastra
+  // um espaço em cidade nova. É o dado mais estável da vitrine.
+  return unstable_cache(carregarCidades, ['cidades'], {
+    revalidate: CACHE_CIDADES_SEGUNDOS,
+    tags: [ETIQUETA_VITRINE],
+  })();
+}
+
+async function carregarCidades(): Promise<string[]> {
   const linhas = await serviceDb()
     .selectDistinct({ cidade: venues.cidade })
     .from(venues)

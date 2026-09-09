@@ -12,7 +12,18 @@ import { dataLonga, hora } from '@/lib/datas';
 import { buscarEventoPublico, resolverTenantPorSlug } from '@/lib/public-queries';
 import { criarPedido } from './acoes';
 
-export const revalidate = 15;
+/**
+ * Não há `export const revalidate` aqui, e a ausência é proposital.
+ *
+ * Havia — e não fazia nada. O cabeçalho lê o cookie de sessão para saber se
+ * mostra "Entrar" ou "Painel do produtor", e ler cookie torna a rota inteira
+ * dinâmica: o Next ignora o `revalidate` em silêncio. A página continuava
+ * indo ao banco em toda visita, e o teste de carga cobrou a conta.
+ *
+ * O cache vive nas consultas (`src/lib/public-queries.ts`), que funcionam
+ * mesmo com renderização dinâmica. Config que parece proteger e não protege é
+ * pior que config nenhuma.
+ */
 
 type Props = { params: Promise<{ tenantSlug: string; eventSlug: string }> };
 

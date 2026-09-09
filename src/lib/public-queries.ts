@@ -13,14 +13,44 @@
  * colunas públicas (`id`, `slug`, `nome`) de tenants ativos. Nada de taxa,
  * CNPJ ou dado de recebedor passa por aqui. A partir do `id` resolvido, todo
  * o resto usa `withTenant()` e volta a ser protegido pelo RLS.
+ *
+ * ---
+ *
+ * **Por que estas leituras são cacheadas.**
+ *
+ * Numa abertura de vendas, a esmagadora maioria dos acessos é gente que só
+ * abre a página. Se cada um desses acessos toca o banco, o banco cai antes de
+ * a primeira compra acontecer — foi o que o teste de carga mostrou: com 200
+ * acessos simultâneos, 83% receberam erro 500 na busca do tenant.
+ *
+ * O `export const revalidate` da página não resolvia isso: o cabeçalho lê o
+ * cookie de sessão, e ler cookie torna a rota inteira dinâmica. O cache
+ * precisa estar na consulta, não na página.
+ *
+ * O que fica velho por até 15 segundos é apenas o CONTADOR de estoque. Quem
+ * decide se ainda há ingresso é o `UPDATE` atômico da reserva, que nunca é
+ * cacheado. O pior caso é alguém ver "disponível" e receber "esgotou agora" —
+ * incômodo, e infinitamente melhor que o site fora do ar.
  */
 import 'server-only';
 
 import { and, asc, eq, gt, inArray } from 'drizzle-orm';
+import { unstable_cache } from 'next/cache';
 
 import { serviceDb, withTenant } from '@/db/client';
 import { events, tenants, ticketTypes, venues } from '@/db/schema';
 import { disponivel } from '@/domain/inventory';
+import { etiquetaDeEventos, etiquetaDeTenant } from '@/lib/cache-publico';
+
+/**
+ * 15s é o ponto de equilíbrio: derruba a carga no banco em mais de 90% numa
+ * abertura, e um contador de estoque com 15 segundos de atraso não muda a
+ * decisão de ninguém.
+ */
+const CACHE_EVENTO_SEGUNDOS = 15;
+
+/** O cadastro do produtor muda raramente; não há motivo para reler direto. */
+const CACHE_TENANT_SEGUNDOS = 60;
 
 export type TenantPublico = {
   id: string;
@@ -42,7 +72,19 @@ export type TenantPublico = {
 /** Estados em que um evento aparece na vitrine. */
 const VISIVEIS = ['publicado', 'esgotado'] as const;
 
+/**
+ * A consulta que a Vercel apontou no alerta de 5xx: era executada uma vez por
+ * visita, e é a primeira coisa que toda página pública faz. Cacheada, deixa
+ * de existir como carga.
+ */
 export async function resolverTenantPorSlug(slug: string): Promise<TenantPublico | null> {
+  return unstable_cache(() => carregarTenantPorSlug(slug), ['tenant-por-slug', slug], {
+    revalidate: CACHE_TENANT_SEGUNDOS,
+    tags: [etiquetaDeTenant(slug)],
+  })();
+}
+
+async function carregarTenantPorSlug(slug: string): Promise<TenantPublico | null> {
   const [linha] = await serviceDb()
     .select({
       id: tenants.id,
@@ -229,10 +271,67 @@ function situacaoDoLote(
   return 'a_venda';
 }
 
+/**
+ * A fronteira do cache é explícita de propósito.
+ *
+ * O cache do Next guarda JSON. Um `Date` que entra volta como `string`, sem
+ * erro de tipo e sem aviso — a tela só quebraria em produção, na formatação.
+ * Então `carregarEventoBruto` devolve texto ISO, e a conversão acontece aqui,
+ * de um lado só.
+ */
 export async function buscarEventoPublico(
   tenantId: string,
   eventSlug: string,
 ): Promise<EventoPublico | null> {
+  const bruto = await unstable_cache(
+    () => carregarEventoBruto(tenantId, eventSlug),
+    ['evento-publico', tenantId, eventSlug],
+    { revalidate: CACHE_EVENTO_SEGUNDOS, tags: [etiquetaDeEventos(tenantId)] },
+  )();
+
+  if (!bruto) return null;
+
+  /**
+   * O relógio é lido AGORA, fora do cache, de propósito. Só os contadores de
+   * estoque podem ficar velhos; a hora de abertura da venda, não. Se `agora`
+   * viesse do cache, um lote marcado "em breve" continuaria "em breve" por até
+   * 15 segundos depois da hora marcada — justo no minuto em que todo mundo
+   * está com a página aberta esperando.
+   */
+  const agora = new Date();
+
+  const lotes: LotePublico[] = bruto.lotes
+    .map((l) => ({
+      ...l,
+      vendasInicio: new Date(l.vendasInicio),
+      vendasFim: new Date(l.vendasFim),
+    }))
+    // Lote inativo de lote anterior não interessa ao comprador.
+    .filter((l) => l.ativo || disponivel(l) > 0)
+    .map((l) => ({
+      id: l.id,
+      nome: l.nome,
+      descricao: l.descricao,
+      precoCentavos: l.precoCentavos,
+      tipo: l.tipo,
+      exigeDocumento: l.exigeDocumento,
+      limitePorPedido: l.limitePorPedido,
+      vendasInicio: l.vendasInicio,
+      vendasFim: l.vendasFim,
+      ativo: l.ativo,
+      disponivel: disponivel(l),
+      situacao: situacaoDoLote(l, agora),
+    }));
+
+  return {
+    ...bruto.evento,
+    dataInicio: new Date(bruto.evento.dataInicio),
+    dataFim: new Date(bruto.evento.dataFim),
+    lotes,
+  };
+}
+
+async function carregarEventoBruto(tenantId: string, eventSlug: string) {
   return withTenant(tenantId, async (tx) => {
     const [evento] = await tx
       .select({
@@ -282,12 +381,29 @@ export async function buscarEventoPublico(
       .where(eq(ticketTypes.eventId, evento.id))
       .orderBy(asc(ticketTypes.ordem), asc(ticketTypes.precoCentavos));
 
-    const agora = new Date();
-
-    const lotes: LotePublico[] = linhas
-      // Lote inativo de lote anterior não interessa ao comprador.
-      .filter((l) => l.ativo || disponivel(l) > 0)
-      .map((l) => ({
+    return {
+      evento: {
+        id: evento.id,
+        slug: evento.slug,
+        titulo: evento.titulo,
+        descricao: evento.descricao,
+        imagemUrl: evento.imagemUrl,
+        dataInicio: evento.dataInicio.toISOString(),
+        dataFim: evento.dataFim.toISOString(),
+        classificacaoEtaria: evento.classificacaoEtaria,
+        status: evento.status,
+        corAcento: evento.corAcento,
+        ingressoNominal: evento.ingressoNominal,
+        exigeDocumentoEntrada: evento.exigeDocumentoEntrada,
+        politicaReembolso: evento.politicaReembolso,
+        venue: {
+          nome: evento.venueNome,
+          endereco: evento.venueEndereco,
+          cidade: evento.venueCidade,
+          uf: evento.venueUf,
+        },
+      },
+      lotes: linhas.map((l) => ({
         id: l.id,
         nome: l.nome,
         descricao: l.descricao,
@@ -295,34 +411,13 @@ export async function buscarEventoPublico(
         tipo: l.tipo,
         exigeDocumento: l.exigeDocumento,
         limitePorPedido: l.limitePorPedido,
-        vendasInicio: l.vendasInicio,
-        vendasFim: l.vendasFim,
+        vendasInicio: l.vendasInicio.toISOString(),
+        vendasFim: l.vendasFim.toISOString(),
         ativo: l.ativo,
-        disponivel: disponivel(l),
-        situacao: situacaoDoLote(l, agora),
-      }));
-
-    return {
-      id: evento.id,
-      slug: evento.slug,
-      titulo: evento.titulo,
-      descricao: evento.descricao,
-      imagemUrl: evento.imagemUrl,
-      dataInicio: evento.dataInicio,
-      dataFim: evento.dataFim,
-      classificacaoEtaria: evento.classificacaoEtaria,
-      status: evento.status,
-      corAcento: evento.corAcento,
-      ingressoNominal: evento.ingressoNominal,
-      exigeDocumentoEntrada: evento.exigeDocumentoEntrada,
-      politicaReembolso: evento.politicaReembolso,
-      venue: {
-        nome: evento.venueNome,
-        endereco: evento.venueEndereco,
-        cidade: evento.venueCidade,
-        uf: evento.venueUf,
-      },
-      lotes,
+        quantidadeTotal: l.quantidadeTotal,
+        quantidadeVendida: l.quantidadeVendida,
+        quantidadeReservada: l.quantidadeReservada,
+      })),
     };
   });
 }
