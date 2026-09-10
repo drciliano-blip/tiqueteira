@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -9,6 +9,7 @@ import { withTenant } from '@/db/client';
 import { events, orderItems, orders, ticketTypes } from '@/db/schema';
 import { TTL_RESERVA_PADRAO_SEGUNDOS } from '@/domain/inventory';
 import { calcularTaxas } from '@/lib/fees';
+import { cookieDaFila, consumirVez, estadoDaFila, temVez } from '@/lib/fila';
 import { reservarEstoque } from '@/lib/inventory';
 import { aplicarBps } from '@/lib/money';
 import { mensagemDeEspera, registrarTentativa } from '@/lib/rate-limit';
@@ -47,6 +48,12 @@ type ItemPedido = { ticketTypeId: string; quantidade: number };
  */
 class CompraError extends Error {}
 
+/**
+ * Não é erro: é a fila fazendo o trabalho dela. Vira redirecionamento para a
+ * sala de espera, e não mensagem vermelha na tela do comprador.
+ */
+class SemVezError extends Error {}
+
 export type ResultadoCompra = { erro: string };
 
 export async function criarPedido(
@@ -59,8 +66,13 @@ export async function criarPedido(
   try {
     destino = await montarPedido(tenantSlug, eventSlug, itens);
   } catch (e) {
-    if (e instanceof CompraError) return { erro: e.message };
-    throw e;
+    if (e instanceof SemVezError) {
+      destino = `/${tenantSlug}/e/${eventSlug}/fila`;
+    } else if (e instanceof CompraError) {
+      return { erro: e.message };
+    } else {
+      throw e;
+    }
   }
 
   // Fora do try: `redirect` funciona lançando uma exceção de controle, e
@@ -80,6 +92,7 @@ async function montarPedido(
 
   const taxas = await configDeTaxasDoTenant(tenant.id);
 
+  const jarDeCookies = await cookies();
   const cabecalhos = await headers();
   const ip =
     cabecalhos.get('x-forwarded-for')?.split(',')[0]?.trim() ??
@@ -94,7 +107,7 @@ async function montarPedido(
   const limite = await registrarTentativa('criarPedido', ip ?? 'sem-ip');
   if (!limite.permitido) throw new CompraError(mensagemDeEspera(limite.esperarSegundos));
 
-  const orderId = await withTenant(tenant.id, async (tx) => {
+  const criado = await withTenant(tenant.id, async (tx) => {
     const [evento] = await tx
       .select({ id: events.id, status: events.status, titulo: events.titulo })
       .from(events)
@@ -104,6 +117,19 @@ async function montarPedido(
     if (!evento) throw new CompraError('Evento não encontrado.');
     if (evento.status !== 'publicado') {
       throw new CompraError('As vendas deste evento não estão abertas.');
+    }
+
+    /**
+     * Fila virtual — ADR-014.
+     *
+     * A conferência é barata de propósito: uma leitura da linha do evento e,
+     * só se a fila estiver ligada, uma da linha da pessoa. Evento sem fila
+     * não paga nada por uma peça que existe para festival.
+     */
+    const fila = await estadoDaFila(evento.id);
+    if (fila?.filaAtiva) {
+      const senha = jarDeCookies.get(cookieDaFila(evento.id))?.value;
+      if (!(await temVez(evento.id, senha))) throw new SemVezError();
     }
 
     // Preço e limites vêm do banco. O navegador não opina sobre dinheiro.
@@ -244,8 +270,22 @@ async function montarPedido(
       .set({ expiresEm: reserva.expiresEm })
       .where(eq(orders.id, pedido.id));
 
-    return pedido.id;
+    return { orderId: pedido.id, eventoId: evento.id };
   });
 
-  return `/checkout/${orderId}`;
+  /**
+   * A vez morre no uso.
+   *
+   * Sem isto, quem foi chamado uma vez compraria a noite inteira sem voltar
+   * para a fila — que é precisamente o cambista com script que a fila existe
+   * para atrapalhar. Quem quiser comprar de novo pega senha de novo, como
+   * todo mundo.
+   */
+  await consumirVez(
+    criado.eventoId,
+    tenant.id,
+    jarDeCookies.get(cookieDaFila(criado.eventoId))?.value,
+  );
+
+  return `/checkout/${criado.orderId}`;
 }

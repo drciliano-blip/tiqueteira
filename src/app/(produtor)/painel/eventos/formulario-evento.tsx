@@ -23,6 +23,9 @@ export type ValoresEvento = {
   exigeDocumentoEntrada: boolean;
   controlaSaida: boolean;
   permiteReentrada: boolean;
+  filaAtiva: boolean;
+  filaCapacidade: number;
+  filaJanelaMinutos: number;
 };
 
 export type Espaco = { id: string; nome: string; capacidadeMaxima: number };
@@ -301,6 +304,67 @@ export function FormularioEvento({
             </span>
           </span>
         </label>
+      </fieldset>
+
+      <fieldset className="space-y-3 rounded-cartao border border-line bg-raised p-4">
+        <legend className="px-1 text-sm font-medium">Abertura de vendas</legend>
+
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            name="filaAtiva"
+            defaultChecked={valores?.filaAtiva ?? false}
+            className="mt-0.5 h-4 w-4"
+          />
+          <span>
+            Fila virtual na abertura
+            <span className="block text-xs text-faint">
+              Para quando muito mais gente do que ingresso chega ao mesmo tempo. Sem ela, quem
+              não vai conseguir comprar faz quem vai conseguir esperar junto — e todo mundo
+              estoura o tempo limite. Casa noturna normalmente não precisa.
+            </span>
+          </span>
+        </label>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="filaCapacidade" className="block text-sm font-medium">
+              Comprando ao mesmo tempo
+            </label>
+            <input
+              id="filaCapacidade"
+              name="filaCapacidade"
+              type="number"
+              min={1}
+              max={5000}
+              defaultValue={valores?.filaCapacidade ?? 200}
+              className={campo}
+            />
+            <p className="mt-1.5 text-xs text-faint">
+              Quantas pessoas a fila deixa passar por vez. Mais alto encurta a fila e alonga
+              cada compra; mais baixo faz o contrário.
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="filaJanelaMinutos" className="block text-sm font-medium">
+              Tempo para concluir
+            </label>
+            <input
+              id="filaJanelaMinutos"
+              name="filaJanelaMinutos"
+              type="number"
+              min={2}
+              max={60}
+              defaultValue={valores?.filaJanelaMinutos ?? 10}
+              className={campo}
+            />
+            <p className="mt-1.5 text-xs text-faint">
+              Minutos que cada pessoa chamada tem. Quem não conclui volta para o fim, e a vaga
+              vai para o próximo — senão a fila para de andar por causa de quem fechou a aba.
+            </p>
+          </div>
+        </div>
       </fieldset>
 
       {estado.erro && (

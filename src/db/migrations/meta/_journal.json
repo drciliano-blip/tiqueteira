@@ -57,6 +57,13 @@
       "when": 1788976851035,
       "tag": "0007_modern_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788999248370,
+      "tag": "0008_cool_pestilence",
+      "breakpoints": true
     }
   ]
 }

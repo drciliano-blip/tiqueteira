@@ -11,6 +11,7 @@
  */
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   check,
   index,
@@ -187,6 +188,9 @@ export const externalPaymentEnum = pgEnum('external_payment', [
 ]);
 
 export const guestEntryTypeEnum = pgEnum('guest_entry_type', ['cortesia', 'desconto']);
+
+/** Situação de quem está na fila virtual — ADR-014. */
+export const filaStatusEnum = pgEnum('fila_status', ['aguardando', 'admitido', 'expirado']);
 
 /** Cada passagem pela porta, nos dois sentidos — ADR-011. */
 export const movimentoTipoEnum = pgEnum('movimento_tipo', ['entrada', 'saida']);
@@ -403,6 +407,31 @@ export const events = pgTable(
     // Ingresso nominal e conferência de documento (plano, seção 24)
     ingressoNominal: boolean('ingresso_nominal').notNull().default(true),
     exigeDocumentoEntrada: boolean('exige_documento_entrada').notNull().default(false),
+
+    /**
+     * Fila virtual — ADR-014.
+     *
+     * Desligada por padrão: casa noturna não precisa. Numa abertura de
+     * festival ela é o que impede as 15 mil pessoas que não vão conseguir
+     * ingresso de fazerem as 5 mil que vão conseguir esperarem por elas.
+     */
+    filaAtiva: boolean('fila_ativa').notNull().default(false),
+    /** Quantas pessoas podem estar comprando ao mesmo tempo. */
+    filaCapacidade: integer('fila_capacidade').notNull().default(200),
+    /** Quanto tempo cada pessoa chamada tem para concluir. */
+    filaJanelaMinutos: integer('fila_janela_minutos').notNull().default(10),
+    /** Último número distribuído. Cresce a cada pessoa que entra na fila. */
+    filaUltimoNumero: bigint('fila_ultimo_numero', { mode: 'number' }).notNull().default(0),
+    /**
+     * Marca d'água: todo número menor ou igual já foi chamado. Comparar dois
+     * inteiros é o que torna a consulta barata para 20 mil pessoas
+     * perguntando — contar linhas a cada pergunta faria a fila virar o
+     * gargalo que ela existe para evitar.
+     */
+    filaChamadosAte: bigint('fila_chamados_ate', { mode: 'number' }).notNull().default(0),
+    /** Marca anterior e quando ela mudou: é daqui que sai o ritmo observado. */
+    filaMarcaAnterior: bigint('fila_marca_anterior', { mode: 'number' }).notNull().default(0),
+    filaAvancadaEm: timestamp('fila_avancada_em', { withTimezone: true }),
 
     /**
      * Controle de saída — ADR-011.
@@ -827,6 +856,45 @@ export const tickets = pgTable(
       'tickets_checkin_ck',
       sql`(${t.status} <> 'usado') or (${t.checkedInEm} is not null)`,
     ),
+  ],
+);
+
+/**
+ * Fila virtual — ADR-014.
+ *
+ * Uma linha por pessoa que chegou, com o número de chegada. O token vive num
+ * cookie e só o hash é guardado, pelo mesmo motivo do ingresso: quem tem a
+ * linha do banco não consegue se passar por quem está na fila.
+ *
+ * A vez não é transferível de propósito. Se fosse, a vez viraria mercadoria —
+ * exatamente o cambista que a fila deveria atrapalhar.
+ */
+export const filaVirtual = pgTable(
+  'fila_virtual',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    /** SHA-256 do token do cookie. */
+    tokenHash: text('token_hash').notNull(),
+    numero: bigint('numero', { mode: 'number' }).notNull(),
+    status: filaStatusEnum('status').notNull().default('aguardando'),
+    criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+    admitidoEm: timestamp('admitido_em', { withTimezone: true }),
+    /** Fim da janela de compra de quem foi chamado. */
+    expiraEm: timestamp('expira_em', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('fila_virtual_token_key').on(t.tokenHash),
+    uniqueIndex('fila_virtual_evento_numero_key').on(t.eventId, t.numero),
+    // Contar quem está ocupando vaga agora é a consulta do avanço da fila.
+    index('fila_virtual_ocupando_idx')
+      .on(t.eventId, t.expiraEm)
+      .where(sql`status = 'admitido'`),
   ],
 );
 
@@ -1266,6 +1334,7 @@ export type Reservation = typeof reservations.$inferSelect;
 export type Ticket = typeof tickets.$inferSelect;
 export type NewTicket = typeof tickets.$inferInsert;
 export type TicketMovimento = typeof ticketMovimentos.$inferSelect;
+export type FilaVirtual = typeof filaVirtual.$inferSelect;
 export type Payout = typeof payouts.$inferSelect;
 export type Refund = typeof refunds.$inferSelect;
 export type Chargeback = typeof chargebacks.$inferSelect;
@@ -1289,6 +1358,7 @@ export const TENANT_SCOPED_TABLES = [
   'reservations',
   'tickets',
   'ticket_movimentos',
+  'fila_virtual',
   'payouts',
   'refunds',
   'chargebacks',

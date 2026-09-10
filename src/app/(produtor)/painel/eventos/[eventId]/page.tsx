@@ -56,6 +56,9 @@ export default async function EditarEvento({ params }: Props) {
         exigeDocumentoEntrada: events.exigeDocumentoEntrada,
         controlaSaida: events.controlaSaida,
         permiteReentrada: events.permiteReentrada,
+        filaAtiva: events.filaAtiva,
+        filaCapacidade: events.filaCapacidade,
+        filaJanelaMinutos: events.filaJanelaMinutos,
         status: events.status,
       })
       .from(events)
@@ -168,6 +171,9 @@ export default async function EditarEvento({ params }: Props) {
               exigeDocumentoEntrada: evento.exigeDocumentoEntrada,
               controlaSaida: evento.controlaSaida,
               permiteReentrada: evento.permiteReentrada,
+              filaAtiva: evento.filaAtiva,
+              filaCapacidade: evento.filaCapacidade,
+              filaJanelaMinutos: evento.filaJanelaMinutos,
             }}
           />
         </div>

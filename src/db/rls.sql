@@ -76,7 +76,8 @@ declare
     'venues', 'events', 'ticket_types', 'coupons',
     'orders', 'order_items', 'reservations', 'tickets',
     'payouts', 'refunds', 'chargebacks', 'memberships',
-    'event_splits', 'guest_lists', 'guest_list_entries', 'ticket_movimentos'
+    'event_splits', 'guest_lists', 'guest_list_entries', 'ticket_movimentos',
+    'fila_virtual'
   ];
 begin
   foreach t in array tabelas loop

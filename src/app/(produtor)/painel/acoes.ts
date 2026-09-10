@@ -141,6 +141,9 @@ const EventoSchema = z
     exigeDocumentoEntrada: z.coerce.boolean().optional(),
     controlaSaida: z.coerce.boolean().optional(),
     permiteReentrada: z.coerce.boolean().optional(),
+    filaAtiva: z.coerce.boolean().optional(),
+    filaCapacidade: z.coerce.number().int().min(1).max(5000),
+    filaJanelaMinutos: z.coerce.number().int().min(2).max(60),
   })
   .refine(
     (d) => instante(d.dataFim, d.horaFim) > instante(d.dataInicio, d.horaInicio),
@@ -164,6 +167,9 @@ function lerEvento(tenantId: string, formData: FormData) {
     exigeDocumentoEntrada: formData.get('exigeDocumentoEntrada') === 'on',
     controlaSaida: formData.get('controlaSaida') === 'on',
     permiteReentrada: formData.get('permiteReentrada') === 'on',
+    filaAtiva: formData.get('filaAtiva') === 'on',
+    filaCapacidade: formData.get('filaCapacidade') ?? 200,
+    filaJanelaMinutos: formData.get('filaJanelaMinutos') ?? 10,
   });
 }
 
@@ -233,6 +239,9 @@ export async function criarEvento(
           exigeDocumentoEntrada: d.exigeDocumentoEntrada ?? false,
           controlaSaida: d.controlaSaida ?? false,
           permiteReentrada: d.permiteReentrada ?? true,
+          filaAtiva: d.filaAtiva ?? false,
+          filaCapacidade: d.filaCapacidade,
+          filaJanelaMinutos: d.filaJanelaMinutos,
           status: 'rascunho',
         })
         .returning({ id: events.id });

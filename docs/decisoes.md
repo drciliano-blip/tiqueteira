@@ -507,3 +507,72 @@ mesma: `UPDATE` condicional, sem leitura prévia. O teste de 50 compras
 simultâneas para 10 ingressos continua verde, e a medição de 500 para 200
 vendeu exatamente 200. Ganhar vazão à custa de vender ingresso a mais seria
 troca ruim em qualquer velocidade.
+
+---
+
+## ADR-014 — Fila virtual
+
+**Data:** 2026-09-09
+**Status:** aceita
+
+**Contexto.** A medição de ADR-013 mostrou o teto da abertura de vendas: cerca
+de 11 reservas por segundo por lote. Para casa noturna isso é folgado. Para o
+público novo — festivais de 5 a 10 mil pessoas — não é, e o motivo não é o
+número: é **quem entra na fila**.
+
+Numa abertura de festival não são 5 mil pessoas comprando 5 mil ingressos, são
+20 mil tentando. As 15 mil que não vão conseguir **também disputam a mesma
+linha travada do lote**, porque a tentativa que falha por falta de estoque
+ainda precisa examinar aquela linha. Todo mundo espera por todo mundo, e quem
+estava em primeiro lugar também estoura o tempo limite.
+
+**Decisão.** Fila virtual, desligada por padrão e ligada por evento. Um número
+fixo de pessoas compra por vez; as demais esperam **sabendo onde estão**.
+
+O sistema não fica mais rápido. Fica **previsível** — e previsível é o que
+impede a pessoa de recarregar a página dez vezes, que é o que transforma
+lentidão em queda.
+
+**A consulta precisa ser barata, e essa é a decisão técnica central.** Vinte
+mil pessoas perguntando "já é minha vez?" a cada poucos segundos é carga de
+sobra para derrubar exatamente o sistema que a fila protege. Então:
+
+- cada pessoa recebe um **número de chegada**, imutável;
+- o evento guarda uma **marca d'água**: todo número menor ou igual já foi
+  chamado;
+- a posição é a subtração de dois inteiros lidos da linha do evento. Nada
+  percorre a fila.
+
+Contar linhas a cada pergunta faria a fila virar o gargalo que ela existe para
+evitar.
+
+**O avanço é oportunista, não agendado.** Acontece dentro da própria consulta,
+no máximo uma vez a cada poucos segundos por evento — a condição de tempo mora
+no `WHERE`, então duas requisições simultâneas não avançam a fila duas vezes,
+sem lock explícito. Sem cron, sem job, sem mais uma peça para dar errado às
+duas da manhã.
+
+**Entrar na fila é um comando só** (ADR-013): o contador do evento sobe e a
+linha da fila nasce junto. É a operação mais disputada de uma abertura — 20 mil
+pessoas passam por ela em poucos minutos, todas na mesma linha do evento.
+
+**A vaga de quem some volta.** Cada pessoa chamada tem uma janela; quem não
+conclui perde a vez e volta para o fim. É duro, e a alternativa é pior: a vaga
+ficaria presa a quem fechou a aba, e a fila pararia de andar para todo mundo.
+
+**A vez morre no uso.** Ao criar o pedido, a senha é queimada. Sem isso, quem
+foi chamado uma vez compraria a noite inteira sem voltar para a fila — que é
+precisamente o cambista com script que a fila existe para atrapalhar. E a vez
+não é transferível: se fosse, viraria mercadoria.
+
+**A estimativa vem do ritmo observado, não do teórico.** O teórico erra sempre
+para pior — supõe que todo admitido usa a janela inteira, quando a maioria
+compra em dois minutos. Uma fila que promete quarenta minutos e anda em cinco
+perde a pessoa antes de andar. Enquanto não há ritmo medido, a tela diz
+"calculando" em vez de inventar um número que a pessoa usaria para decidir se
+fica.
+
+**Consequência.** O `criarPedido` ganhou um porteiro: fila ligada sem vez
+válida vira redirecionamento para a sala de espera, não mensagem de erro.
+Evento com a fila desligada não paga nada por isso — uma leitura da linha do
+evento, que já estava sendo lida.
