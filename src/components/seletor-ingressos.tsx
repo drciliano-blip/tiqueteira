@@ -34,6 +34,7 @@ export type SeletorProps = {
    */
   onComprar: (
     itens: { ticketTypeId: string; quantidade: number }[],
+    cupom?: string,
   ) => Promise<{ erro: string } | void>;
 };
 
@@ -54,6 +55,8 @@ export function SeletorIngressos({
   const [quantidades, setQuantidades] = useState<Record<string, number>>({});
   const [enviando, iniciarEnvio] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
+  const [cupom, setCupom] = useState('');
+  const [mostrarCupom, setMostrarCupom] = useState(false);
 
   /** Conveniência de uma unidade, respeitando o piso configurado. */
   const convenienciaUnitaria = (preco: number) => {
@@ -98,7 +101,7 @@ export function SeletorIngressos({
     setErro(null);
     iniciarEnvio(async () => {
       try {
-        const resultado = await onComprar(itens);
+        const resultado = await onComprar(itens, cupom.trim() || undefined);
         if (resultado?.erro) setErro(resultado.erro);
       } catch (e) {
         setErro(
@@ -230,6 +233,40 @@ export function SeletorIngressos({
           <div aria-hidden className="h-24" />
 
           <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-base/95 backdrop-blur">
+            {/*
+              O cupom fica escondido atrás de um link de propósito. Campo de
+              cupom visível faz quem não tem um sair da compra para procurar,
+              e boa parte não volta.
+            */}
+            {mostrarCupom ? (
+              <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 pt-3">
+                <input
+                  value={cupom}
+                  onChange={(e) => setCupom(e.target.value)}
+                  placeholder="Código do cupom"
+                  aria-label="Código do cupom"
+                  maxLength={40}
+                  autoFocus
+                  className="w-full min-w-0 flex-1 rounded-botao border border-line bg-raised px-3 py-2 text-sm uppercase focus:border-accent focus:outline-none"
+                />
+                {cupom.trim().length > 0 && (
+                  <span className="shrink-0 text-xs text-faint">
+                    conferido na hora de reservar
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="mx-auto max-w-3xl px-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarCupom(true)}
+                  className="text-xs text-muted underline underline-offset-2 hover:text-txt"
+                >
+                  Tenho um cupom
+                </button>
+              </div>
+            )}
+
             <div className="mx-auto flex max-w-3xl items-center gap-4 px-4 py-3">
               <div className="min-w-0 flex-1">
                 <p className="tabular text-lg font-bold leading-tight">

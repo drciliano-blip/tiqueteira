@@ -9,9 +9,10 @@ import { withTenant } from '@/db/client';
 import { events, orderItems, orders, ticketTypes } from '@/db/schema';
 import { TTL_RESERVA_PADRAO_SEGUNDOS } from '@/domain/inventory';
 import { calcularTaxas } from '@/lib/fees';
+import { consumirCupom } from '@/lib/cupons';
 import { cookieDaFila, consumirVez, estadoDaFila, temVez } from '@/lib/fila';
 import { reservarEstoque } from '@/lib/inventory';
-import { aplicarBps } from '@/lib/money';
+import { aplicarBps, repartir } from '@/lib/money';
 import { mensagemDeEspera, registrarTentativa } from '@/lib/rate-limit';
 import { configDeTaxasDoTenant, resolverTenantPorSlug } from '@/lib/public-queries';
 
@@ -37,6 +38,8 @@ const Entrada = z.object({
     )
     .min(1)
     .max(10),
+  /** Digitado pelo comprador. Vazio é o caso normal. */
+  cupom: z.string().trim().max(40).optional(),
 });
 
 type ItemPedido = { ticketTypeId: string; quantidade: number };
@@ -60,11 +63,12 @@ export async function criarPedido(
   tenantSlug: string,
   eventSlug: string,
   itens: ItemPedido[],
+  cupom?: string,
 ): Promise<ResultadoCompra | void> {
   let destino: string;
 
   try {
-    destino = await montarPedido(tenantSlug, eventSlug, itens);
+    destino = await montarPedido(tenantSlug, eventSlug, itens, cupom);
   } catch (e) {
     if (e instanceof SemVezError) {
       destino = `/${tenantSlug}/e/${eventSlug}/fila`;
@@ -84,8 +88,10 @@ async function montarPedido(
   tenantSlug: string,
   eventSlug: string,
   itens: ItemPedido[],
+  cupom?: string,
 ): Promise<string> {
-  const entrada = Entrada.parse({ tenantSlug, eventSlug, itens });
+  const entrada = Entrada.parse({ tenantSlug, eventSlug, itens, cupom });
+  const codigoCupom = entrada.cupom?.trim() || null;
 
   const tenant = await resolverTenantPorSlug(entrada.tenantSlug);
   if (!tenant) throw new CompraError('Produtor não encontrado.');
@@ -172,24 +178,73 @@ async function montarPedido(
       unidades += item.quantidade;
     }
 
-    // A conveniência com piso mínimo é por unidade, não sobre o subtotal:
-    // senão o piso protegeria só o pedido, e não o ingresso barato.
+    /**
+     * Cupom, se houver.
+     *
+     * O uso é consumido **aqui dentro**, na mesma transação do pedido, por um
+     * `UPDATE` condicional: um cupom de cem usos precisa parar em cem, e cem
+     * pessoas clicando ao mesmo tempo é exatamente o caso em que
+     * ler-para-depois-decidir passa de cem. Se a reserva expirar sem
+     * pagamento, o uso volta.
+     */
+    let descontoCentavos = 0;
+    let cupomId: string | null = null;
+
+    if (codigoCupom) {
+      const r = await consumirCupom(tx, {
+        tenantId: tenant.id,
+        eventId: evento.id,
+        codigo: codigoCupom,
+        subtotalCentavos: subtotal,
+      });
+
+      if (!r.ok) throw new CompraError(r.explicacao);
+
+      descontoCentavos = r.cupom.descontoCentavos;
+      cupomId = r.cupom.cupomId;
+    }
+
+    /**
+     * A conveniência com piso mínimo é por unidade, não sobre o subtotal:
+     * senão o piso protegeria só o pedido, e não o ingresso barato.
+     *
+     * E ela incide sobre o preço **já descontado** — ver `src/lib/fees.ts`.
+     * Cobrar taxa de serviço sobre um preço que o comprador não pagou é o
+     * tipo de coisa que o Procon autua. Por isso o desconto é repartido entre
+     * as unidades antes: um cupom de R$ 20 num pedido de dois ingressos tira
+     * R$ 10 de cada, e é sobre o que sobrou que a taxa é calculada.
+     */
+    const precosUnitarios: number[] = [];
+    for (const item of entrada.itens) {
+      const lote = porId.get(item.ticketTypeId)!;
+      for (let i = 0; i < item.quantidade; i++) precosUnitarios.push(lote.precoCentavos);
+    }
+
+    const descontoPorUnidade =
+      descontoCentavos > 0 && subtotal > 0
+        ? repartir(descontoCentavos, precosUnitarios)
+        : precosUnitarios.map(() => 0);
+
     const convenienciaCalculada = taxas.taxaAbsorvidaPeloProdutor
       ? 0
-      : entrada.itens.reduce((acc, item) => {
-          const lote = porId.get(item.ticketTypeId)!;
-          if (lote.precoCentavos === 0) return acc;
-          const unitaria = Math.max(
-            aplicarBps(lote.precoCentavos, taxas.taxaConvenienciaBps),
-            taxas.taxaMinimaCentavos,
+      : precosUnitarios.reduce((acc, preco, i) => {
+          const efetivo = preco - (descontoPorUnidade[i] ?? 0);
+          // Cortesia e ingresso zerado por cupom não pagam conveniência.
+          if (efetivo <= 0) return acc;
+          return (
+            acc +
+            Math.max(
+              aplicarBps(efetivo, taxas.taxaConvenienciaBps),
+              taxas.taxaMinimaCentavos,
+            )
           );
-          return acc + unitaria * item.quantidade;
         }, 0);
 
     // `calcularTaxas` reparte entre operador e produtor e confere os
     // invariantes; a conveniência já calculada entra como valor fechado.
     const composicao = calcularTaxas({
       subtotalCentavos: subtotal + convenienciaCalculada,
+      descontoCentavos,
       quantidadeIngressos: unidades,
       config: {
         // A conveniência já foi calculada por unidade acima, com o piso
@@ -217,7 +272,8 @@ async function montarPedido(
         )`,
         subtotalCentavos: subtotal,
         convenienciaCentavos: convenienciaCalculada,
-        descontoCentavos: 0,
+        descontoCentavos,
+        cupomId,
         totalCentavos: composicao.totalCentavos,
         valorOperadorCentavos: valorOperador,
         valorProdutorCentavos: composicao.totalCentavos - valorOperador,

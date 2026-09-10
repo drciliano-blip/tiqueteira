@@ -198,6 +198,12 @@ export default async function EditarEvento({ params }: Props) {
           >
             Listas de convidados
           </Link>
+          <Link
+            href={`/painel/eventos/${evento.id}/cupons`}
+            className="inline-block rounded-botao border border-line-forte px-5 py-3 text-sm font-medium transition hover:border-accent hover:text-accent"
+          >
+            Cupons
+          </Link>
         </div>
       </section>
 
