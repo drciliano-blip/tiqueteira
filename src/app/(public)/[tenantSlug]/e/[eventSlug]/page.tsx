@@ -13,17 +13,34 @@ import { buscarEventoPublico, resolverTenantPorSlug } from '@/lib/public-queries
 import { criarPedido } from './acoes';
 
 /**
- * Não há `export const revalidate` aqui, e a ausência é proposital.
+ * A página do evento é a mais visitada da plataforma e a mais castigada numa
+ * abertura de vendas. Ela é HTML igual para todo mundo — ADR-015.
  *
- * Havia — e não fazia nada. O cabeçalho lê o cookie de sessão para saber se
- * mostra "Entrar" ou "Painel do produtor", e ler cookie torna a rota inteira
- * dinâmica: o Next ignora o `revalidate` em silêncio. A página continuava
- * indo ao banco em toda visita, e o teste de carga cobrou a conta.
+ * O `revalidate` só passou a valer depois que o cabeçalho parou de ler o
+ * cookie de sessão. Antes ele lia, isso tornava a rota dinâmica, e o Next
+ * ignorava o `revalidate` **em silêncio**: a página ia ao banco em toda
+ * visita, e o teste de carga cobrou a conta.
  *
- * O cache vive nas consultas (`src/lib/public-queries.ts`), que funcionam
- * mesmo com renderização dinâmica. Config que parece proteger e não protege é
- * pior que config nenhuma.
+ * Os 15 segundos são a idade máxima do contador de estoque na tela. Quem
+ * decide se ainda há ingresso é o `UPDATE` atômico da reserva, que nunca lê
+ * cache — o pior caso é ver "disponível" e receber "esgotou agora".
  */
+export const revalidate = 15;
+
+/**
+ * Numa rota com parâmetros, o `revalidate` sozinho não faz nada: sem
+ * `generateStaticParams` o Next renderiza na hora, a cada visita. Foi assim
+ * que a configuração anterior parecia proteger sem proteger.
+ *
+ * A lista volta vazia de propósito. Não há o que pré-gerar no build — os
+ * eventos nascem depois do deploy, e um build que consulta o banco é um build
+ * que quebra quando o banco pisca. O que importa aqui é a rota **entrar no
+ * regime de cache**: a primeira visita a cada evento gera a página, e as
+ * seguintes leem o que ficou pronto.
+ */
+export function generateStaticParams(): { tenantSlug: string; eventSlug: string }[] {
+  return [];
+}
 
 type Props = { params: Promise<{ tenantSlug: string; eventSlug: string }> };
 

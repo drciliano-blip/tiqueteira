@@ -576,3 +576,52 @@ fica.
 válida vira redirecionamento para a sala de espera, não mensagem de erro.
 Evento com a fila desligada não paga nada por isso — uma leitura da linha do
 evento, que já estava sendo lida.
+
+---
+
+## ADR-015 — A página do evento sai da borda
+
+**Data:** 2026-09-09
+**Status:** aceita
+
+**Contexto.** O teste de carga anterior mediu teto de 500 acessos simultâneos
+na página do evento. Para casa noturna sobra. Para uma abertura de festival em
+que 20 mil pessoas abrem a página no mesmo minuto, não.
+
+A causa estava escrita em `docs/pendencias.md` desde a medição de 08/09: o
+cabeçalho lia o cookie de sessão para decidir entre "Entrar" e "Painel do
+produtor", e **ler cookie torna a rota inteira dinâmica**. O Next passa a
+ignorar `revalidate` em silêncio, e a página ia ao banco em toda visita.
+
+**Decisão.** O estado de login saiu do servidor e foi para o navegador. O
+cabeçalho virou HTML igual para todo mundo; um componente cliente pergunta a
+`/api/sessao` se há painel e troca o botão depois.
+
+**Segunda parte, e a que faltava no diagnóstico original:** numa rota com
+parâmetros, `revalidate` sozinho **não faz nada**. Sem `generateStaticParams`,
+o Next renderiza sob demanda a cada visita, e a configuração parece proteger
+sem proteger — exatamente o defeito que a versão anterior tinha. A lista volta
+vazia de propósito: não há o que pré-gerar no build, porque os eventos nascem
+depois do deploy, e build que consulta banco é build que quebra quando o banco
+pisca. O que importa é a rota entrar no regime de cache.
+
+**Verificado, não suposto.** Antes: `Cache-Control: no-cache,
+must-revalidate`. Depois: `x-nextjs-cache: MISS` na primeira visita, `HIT` nas
+seguintes, com `s-maxage=15, stale-while-revalidate`. Com 500 acessos
+simultâneos numa única máquina local: 500/500, p95 de 599 ms, zero falhas.
+
+Na Vercel o ganho é maior que isso, e de outra natureza: a página cacheada é
+servida pela borda e **não chega ao servidor**. A capacidade de quem só está
+olhando deixa de depender do nosso banco.
+
+**O preço.** O botão de conta aparece uma fração de segundo depois do resto da
+página, como acontece na Sympla. O espaço dele é reservado antes, para que a
+chegada não empurre o layout — botão que se mexe faz a pessoa clicar no lugar
+errado. É troca de estética por capacidade, e numa abertura de festival não há
+dúvida sobre qual das duas importa.
+
+**O que continua fora do cache, de propósito.** Checkout, painel, portaria e
+área do comprador são pessoais por natureza. E o contador de estoque na tela
+pode envelhecer até 15 segundos: quem decide se ainda há ingresso é o `UPDATE`
+atômico da reserva, que nunca lê cache. O pior caso é ver "disponível" e
+receber "esgotou agora".
