@@ -204,6 +204,12 @@ export default async function EditarEvento({ params }: Props) {
           >
             Cupons
           </Link>
+          <Link
+            href={`/painel/eventos/${evento.id}/bilheteria`}
+            className="inline-block rounded-botao border border-line-forte px-5 py-3 text-sm font-medium transition hover:border-accent hover:text-accent"
+          >
+            Bilheteria
+          </Link>
         </div>
       </section>
 

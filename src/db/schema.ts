@@ -629,6 +629,14 @@ export const orders = pgTable(
      * relatório do ECAD e o painel do produtor ficam todos errados.
      */
     canal: salesChannelEnum('canal').notNull().default('online'),
+    /**
+     * Quem vendeu no balcão. Nulo na venda online, onde não há balconista.
+     * É o que permite conferir a maquininha contra o sistema por operador —
+     * fechamento de caixa sem responsável não fecha nada.
+     */
+    vendidoPor: uuid('vendido_por').references((): AnyPgColumn => users.id, {
+      onDelete: 'set null',
+    }),
     /** Venda na porta: o dinheiro já está com a casa e NÃO entra no split. */
     metodoExterno: externalPaymentEnum('metodo_externo'),
     pdvOperadorId: uuid('pdv_operador_id').references((): AnyPgColumn => users.id, {
