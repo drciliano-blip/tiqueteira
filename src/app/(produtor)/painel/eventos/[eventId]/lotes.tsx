@@ -19,6 +19,7 @@ export type Lote = {
   quantidadeVendida: number;
   quantidadeReservada: number;
   limitePorPedido: number;
+  limitePorCpf: number | null;
   vendasInicio: Date;
   vendasFim: Date;
   exigeDocumento: boolean;
@@ -242,6 +243,24 @@ function FormularioLote({
             defaultValue={lote?.limitePorPedido ?? 6}
             className={campo}
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium">
+            Limite por CPF <span className="font-normal text-faint">(opcional)</span>
+          </label>
+          <input
+            name="limitePorCpf"
+            type="number"
+            min={1}
+            max={50}
+            placeholder="sem limite"
+            defaultValue={lote?.limitePorCpf ?? ''}
+            className={campo}
+          />
+          <p className="mt-1.5 text-xs text-faint">
+            O limite por pedido sozinho não segura cambista: quem quer cinquenta faz cinquenta
+            pedidos de um. Este conta quantos o mesmo CPF já tem no lote.
+          </p>
         </div>
       </div>
 

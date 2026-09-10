@@ -19,6 +19,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 
 import type { Database } from '@/db/client';
+import { excedeLimitePorCpf } from '@/domain/inventory';
 
 /** Aceita a conexão ou uma transação em curso. */
 export type Executor = Pick<Database, 'execute'>;
@@ -253,7 +254,7 @@ export async function expirarReservasVencidas(
  */
 export async function ingressosDoCpf(
   exec: Executor,
-  params: { ticketTypeId: string; cpf: string },
+  params: { ticketTypeId: string; cpf: string; ignorarOrderId?: string | undefined },
 ): Promise<number> {
   const [linha] = await linhas<{ total: string | number }>(
     exec,
@@ -263,8 +264,88 @@ export async function ingressosDoCpf(
         join orders o on o.id = oi.order_id
        where oi.ticket_type_id = ${params.ticketTypeId}
          and o.comprador_cpf = ${params.cpf}
-         and o.status in ('awaiting_payment', 'paid', 'partially_refunded')
+         and o.id is distinct from ${params.ignorarOrderId ?? null}
+         and (
+           o.status in ('awaiting_payment', 'paid', 'partially_refunded')
+           or (
+             -- Rascunho que já sabe de quem é e ainda segura estoque. É o que
+             -- fecha o furo das dez abas: a primeira a chegar no checkout
+             -- carimba o CPF, e as outras já a enxergam.
+             o.status = 'draft'
+             and o.comprador_cpf is not null
+             and (o.expires_em is null or o.expires_em > now())
+           )
+         )
     `,
   );
   return Number(linha?.total ?? 0);
+}
+
+export type ViolacaoLimiteCpf = {
+  ticketTypeId: string;
+  lote: string;
+  jaTem: number;
+  limite: number;
+};
+
+/**
+ * Confere o limite por CPF de todos os itens do pedido e, se passar, **carimba
+ * o CPF no rascunho**.
+ *
+ * O carimbo é a parte que faz a defesa funcionar. Sem ele, duas abas do mesmo
+ * comprador chegariam ao checkout ao mesmo tempo, as duas contariam zero e as
+ * duas passariam. Com ele, a primeira a comitar já aparece para a segunda.
+ *
+ * A trava consultiva por CPF fecha o resto da janela: duas transações que
+ * contam ao mesmo tempo veriam o mesmo número. Ela é por CPF, então não cria
+ * fila entre compradores diferentes — e vive só até o fim da transação, que
+ * aqui é curta de propósito: a chamada à PSP acontece DEPOIS, fora dela.
+ * Segurar tranca durante chamada de rede externa é como se perde um banco.
+ */
+export async function reservarLimitePorCpf(
+  exec: Executor,
+  params: { orderId: string; cpf: string },
+): Promise<ViolacaoLimiteCpf | null> {
+  await exec.execute(sql`select pg_advisory_xact_lock(hashtext(${'cpf:' + params.cpf}))`);
+
+  const itens = await linhas<{
+    ticket_type_id: string;
+    lote: string;
+    quantidade: number;
+    limite: number | null;
+  }>(
+    exec,
+    sql`
+      select oi.ticket_type_id, tt.nome as lote, oi.quantidade, tt.limite_por_cpf as limite
+        from order_items oi
+        join ticket_types tt on tt.id = oi.ticket_type_id
+       where oi.order_id = ${params.orderId}
+    `,
+  );
+
+  for (const item of itens) {
+    if (item.limite === null) continue;
+
+    const jaTem = await ingressosDoCpf(exec, {
+      ticketTypeId: item.ticket_type_id,
+      cpf: params.cpf,
+      ignorarOrderId: params.orderId,
+    });
+
+    if (excedeLimitePorCpf({ jaTem, pedindo: Number(item.quantidade), limite: item.limite })) {
+      return {
+        ticketTypeId: item.ticket_type_id,
+        lote: item.lote,
+        jaTem,
+        limite: item.limite,
+      };
+    }
+  }
+
+  await exec.execute(sql`
+    update orders set comprador_cpf = ${params.cpf}, atualizado_em = now()
+     where id = ${params.orderId} and status = 'draft'
+  `);
+
+  return null;
 }

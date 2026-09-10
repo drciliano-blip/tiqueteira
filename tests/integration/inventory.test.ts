@@ -17,6 +17,7 @@ import {
   expirarReservasVencidas,
   ingressosDoCpf,
   reservarEstoque,
+  reservarLimitePorCpf,
 } from '@/lib/inventory';
 
 const DIRECT_URL = process.env.DIRECT_URL;
@@ -43,6 +44,7 @@ let sufixo: string;
 async function criarTipo(params: {
   total: number;
   limitePorPedido?: number;
+  limitePorCpf?: number;
   ativo?: boolean;
   janela?: 'aberta' | 'futura' | 'passada';
 }): Promise<string> {
@@ -55,9 +57,10 @@ async function criarTipo(params: {
   const linhas = (await dono.execute(sql`
     insert into ticket_types
       (tenant_id, event_id, nome, preco_centavos, quantidade_total,
-       vendas_inicio, vendas_fim, limite_por_pedido, ativo)
+       vendas_inicio, vendas_fim, limite_por_pedido, limite_por_cpf, ativo)
     values (${tenantId}, ${eventId}, 'Lote de teste', 10000, ${params.total},
-            ${inicio}, ${fim}, ${params.limitePorPedido ?? 6}, ${params.ativo ?? true})
+            ${inicio}, ${fim}, ${params.limitePorPedido ?? 6},
+            ${params.limitePorCpf ?? null}, ${params.ativo ?? true})
     returning id
   `)) as unknown as { id: string }[];
 
@@ -415,5 +418,129 @@ describe('limite por CPF', () => {
     await dono.execute(sql`update orders set status = 'expired' where id = ${orderId}`);
 
     expect(await ingressosDoCpf(dono, { ticketTypeId: tipoId, cpf })).toBe(0);
+  });
+});
+
+describe('limite por CPF', () => {
+  /** Pedido com item, que é o que a contagem por CPF enxerga. */
+  async function pedidoCom(
+    numero: number,
+    tipoId: string,
+    quantidade: number,
+    opcoes: { cpf?: string; status?: string; expiraEm?: string | null } = {},
+  ): Promise<string> {
+    const cpf = opcoes.cpf ?? '99988877766';
+    const orderId = await criarPedido(numero, cpf);
+
+    await dono.execute(sql`
+      insert into order_items (tenant_id, order_id, ticket_type_id, quantidade,
+                               preco_unitario_centavos_snapshot)
+      values (${tenantId}, ${orderId}, ${tipoId}, ${quantidade}, 10000)
+    `);
+
+    if (opcoes.status && opcoes.status !== 'draft') {
+      await dono.execute(sql`
+        update orders set status = ${opcoes.status}::order_status where id = ${orderId}
+      `);
+    }
+
+    if (opcoes.expiraEm !== undefined) {
+      await dono.execute(sql`
+        update orders set expires_em = ${opcoes.expiraEm}::timestamptz where id = ${orderId}
+      `);
+    }
+
+    return orderId;
+  }
+
+  async function conferir(orderId: string, cpf = '99988877766') {
+    return app.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      return reservarLimitePorCpf(tx, { orderId, cpf });
+    });
+  }
+
+  it('deixa passar quem está dentro do limite', async () => {
+    const tipoId = await criarTipo({ total: 100, limitePorCpf: 4 });
+    const pedido = await pedidoCom(4000, tipoId, 2);
+
+    expect(await conferir(pedido)).toBeNull();
+  });
+
+  it('barra o segundo pedido que estoura o limite', async () => {
+    // O limite por PEDIDO não segura cambista: quem quer cinquenta faz
+    // cinquenta pedidos de um. Este é o teste que guarda a defesa de verdade.
+    const tipoId = await criarTipo({ total: 100, limitePorCpf: 4 });
+
+    const primeiro = await pedidoCom(4010, tipoId, 3, { status: 'paid' });
+    expect(primeiro).toBeTruthy();
+
+    const segundo = await pedidoCom(4011, tipoId, 3);
+    const violacao = await conferir(segundo);
+
+    expect(violacao).toMatchObject({ jaTem: 3, limite: 4 });
+  });
+
+  it('carimba o CPF no rascunho, para a próxima aba já enxergar', async () => {
+    const tipoId = await criarTipo({ total: 100, limitePorCpf: 4 });
+
+    // Primeira aba: passa e carimba.
+    const abaUm = await pedidoCom(4020, tipoId, 3, { cpf: '11122233344' });
+    await dono.execute(sql`update orders set comprador_cpf = null where id = ${abaUm}`);
+    expect(await conferir(abaUm, '11122233344')).toBeNull();
+
+    // Segunda aba do mesmo comprador: agora já vê os três da primeira.
+    const abaDois = await pedidoCom(4021, tipoId, 3, { cpf: '11122233344' });
+    await dono.execute(sql`update orders set comprador_cpf = null where id = ${abaDois}`);
+
+    expect(await conferir(abaDois, '11122233344')).toMatchObject({ jaTem: 3, limite: 4 });
+  });
+
+  it('rascunho vencido para de contar', async () => {
+    // Reserva que expirou devolveu o estoque. Continuar contando prenderia o
+    // comprador a um pedido que ele nunca pagou.
+    const tipoId = await criarTipo({ total: 100, limitePorCpf: 4 });
+
+    await pedidoCom(4030, tipoId, 4, {
+      cpf: '55566677788',
+      expiraEm: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const novo = await pedidoCom(4031, tipoId, 4, { cpf: '55566677788' });
+    await dono.execute(sql`update orders set comprador_cpf = null where id = ${novo}`);
+
+    expect(await conferir(novo, '55566677788')).toBeNull();
+  });
+
+  it('lote sem limite não barra ninguém', async () => {
+    const tipoId = await criarTipo({ total: 100 });
+
+    await pedidoCom(4040, tipoId, 6, { cpf: '12312312312', status: 'paid' });
+    const outro = await pedidoCom(4041, tipoId, 6, { cpf: '12312312312' });
+
+    expect(await conferir(outro, '12312312312')).toBeNull();
+  });
+
+  it('o limite é por lote, não por evento', async () => {
+    // Camarote e pista têm limites próprios. Somar os dois puniria quem
+    // comprou um de cada, que é compra honesta.
+    const pista = await criarTipo({ total: 100, limitePorCpf: 2 });
+    const camarote = await criarTipo({ total: 100, limitePorCpf: 2 });
+
+    await pedidoCom(4050, pista, 2, { cpf: '45645645645', status: 'paid' });
+    const noCamarote = await pedidoCom(4051, camarote, 2, { cpf: '45645645645' });
+    await dono.execute(sql`update orders set comprador_cpf = null where id = ${noCamarote}`);
+
+    expect(await conferir(noCamarote, '45645645645')).toBeNull();
+  });
+
+  it('CPF diferente não é afetado pelo pedido do vizinho', async () => {
+    const tipoId = await criarTipo({ total: 100, limitePorCpf: 2 });
+
+    await pedidoCom(4060, tipoId, 2, { cpf: '78978978978', status: 'paid' });
+    const outroComprador = await pedidoCom(4061, tipoId, 2, { cpf: '32132132132' });
+    await dono.execute(sql`update orders set comprador_cpf = null where id = ${outroComprador}`);
+
+    expect(await conferir(outroComprador, '32132132132')).toBeNull();
   });
 });

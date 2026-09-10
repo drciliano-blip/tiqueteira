@@ -106,3 +106,46 @@ export function excedeCotaMeia(
   const cota = Math.floor((capacidade * cotaBps) / 10_000);
   return quantidadesQueConsomemCota.reduce((a, b) => a + b, 0) > cota;
 }
+
+/**
+ * Limite por CPF — plano, seção 10, e caso de borda 16.
+ *
+ * O limite por PEDIDO não segura cambista: quem quer cinquenta ingressos faz
+ * cinquenta pedidos de um. O que segura é contar quantos aquele CPF já tem no
+ * lote, somando o que está pago e o que está a caminho — porque a defesa
+ * precisa valer também para as dez abas abertas ao mesmo tempo.
+ *
+ * `null` em `limite` significa lote sem limite, e é o padrão: a maioria dos
+ * eventos não precisa disso, e limite que atrapalha compra honesta custa mais
+ * caro que o cambista que ele evita.
+ */
+export function excedeLimitePorCpf(params: {
+  jaTem: number;
+  pedindo: number;
+  limite: number | null;
+}): boolean {
+  if (params.limite === null) return false;
+  return params.jaTem + params.pedindo > params.limite;
+}
+
+/** Frase para o comprador: precisa dizer quantos ele já tem, senão parece bug. */
+export function mensagemDeLimitePorCpf(params: {
+  lote: string;
+  jaTem: number;
+  limite: number;
+}): string {
+  const { lote, jaTem, limite } = params;
+
+  if (jaTem >= limite) {
+    return (
+      `Este CPF já tem ${jaTem} ingresso${jaTem === 1 ? '' : 's'} de "${lote}", ` +
+      `que é o limite por pessoa.`
+    );
+  }
+
+  const restam = limite - jaTem;
+  return (
+    `"${lote}" tem limite de ${limite} por CPF. Este CPF já tem ${jaTem}, ` +
+    `então pode levar mais ${restam}.`
+  );
+}

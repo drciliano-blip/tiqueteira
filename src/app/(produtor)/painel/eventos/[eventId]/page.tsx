@@ -80,6 +80,7 @@ export default async function EditarEvento({ params }: Props) {
         quantidadeVendida: ticketTypes.quantidadeVendida,
         quantidadeReservada: ticketTypes.quantidadeReservada,
         limitePorPedido: ticketTypes.limitePorPedido,
+        limitePorCpf: ticketTypes.limitePorCpf,
         vendasInicio: ticketTypes.vendasInicio,
         vendasFim: ticketTypes.vendasFim,
         exigeDocumento: ticketTypes.exigeDocumento,

@@ -4,10 +4,12 @@ import { revalidatePath } from 'next/cache';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { serviceDb } from '@/db/client';
+import { serviceDb, withTenant } from '@/db/client';
 import { orderItems, orders, tenants } from '@/db/schema';
 import { cpfValido, normalizarCpf } from '@/domain/cpf';
+import { mensagemDeLimitePorCpf } from '@/domain/inventory';
 import { montarSplits, type FeeBreakdown } from '@/lib/fees';
+import { reservarLimitePorCpf } from '@/lib/inventory';
 import { OPERADOR } from '@/lib/operador';
 import { getPaymentProvider } from '@/lib/payments/provider';
 import type { SplitRule } from '@/lib/payments/types';
@@ -123,6 +125,30 @@ export async function pagarComPix(
     });
   } catch {
     return { erro: 'Não foi possível montar a cobrança. Tente de novo em instantes.' };
+  }
+
+  /**
+   * Limite por CPF — antes de criar a cobrança, nunca depois.
+   *
+   * Só aqui o CPF existe: o comprador escolhe os ingressos sem se identificar,
+   * e só se identifica agora. Cobrar primeiro e recusar depois seria estornar
+   * dinheiro de quem não fez nada de errado.
+   *
+   * A transação é curta de propósito e termina antes da chamada à PSP. Segurar
+   * tranca durante chamada de rede externa é como se perde um banco.
+   */
+  const violacao = await withTenant(pedido.tenantId, (tx) =>
+    reservarLimitePorCpf(tx, { orderId: pedido.id, cpf: dados.data.cpf }),
+  );
+
+  if (violacao) {
+    return {
+      erro: mensagemDeLimitePorCpf({
+        lote: violacao.lote,
+        jaTem: violacao.jaTem,
+        limite: violacao.limite,
+      }),
+    };
   }
 
   const provider = getPaymentProvider();
