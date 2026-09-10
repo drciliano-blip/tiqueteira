@@ -625,3 +625,62 @@ dúvida sobre qual das duas importa.
 pode envelhecer até 15 segundos: quem decide se ainda há ingresso é o `UPDATE`
 atômico da reserva, que nunca lê cache. O pior caso é ver "disponível" e
 receber "esgotou agora".
+
+---
+
+## ADR-016 — Bilheteria e relatórios: o que dá para entregar sem PSP
+
+**Data:** 2026-09-10
+**Status:** aceita
+
+**Contexto.** A negociação com a PSP continua aberta, e sem ela não existe
+venda online. A pergunta virou: o que ainda dá para construir que **não**
+dependa dessa decisão?
+
+**Decisão 1 — bilheteria física é canal completo hoje.** O canal `pdv` já
+existia no esquema. A venda de balcão não depende de PSP porque **o dinheiro
+não passa pela plataforma**: quem cobra é a maquininha do produtor, ou a mão
+dele. O sistema registra a venda, consome estoque e emite o ingresso, para o
+número da porta fechar com o do painel.
+
+Num festival esse canal responde por uma fatia grande — muita gente decide na
+porta. E é o único caminho de venda que funciona de ponta a ponta enquanto a
+PSP não fecha, o que torna possível operar um evento real antes da Fase 2.
+
+Consequências:
+
+- **O valor inteiro vai para o produtor.** A plataforma não tocou nesse
+  dinheiro e não tem o que reter dele; comissão de bilheteria, se houver, é
+  cobrança à parte, fora do split.
+- **Cortesia sai por zero e continua ocupando lugar.** A capacidade do espaço
+  não distingue quem pagou.
+- **`orders.vendido_por`** é coluna nova. Fechamento de caixa sem responsável
+  não fecha nada.
+- **O estoque vem primeiro**, com a condição no `WHERE`: se não couber a
+  quantidade inteira, nada acontece. Vender três quando só há dois deixaria a
+  bilheteria explicando na porta o que o sistema deveria ter impedido no
+  balcão.
+
+**Decisão 2 — os relatórios saem do livro da porta.** A tabela
+`ticket_movimentos` (ADR-011) já guardava o dado; faltava a leitura. Três
+perguntas que o produtor fazia e ninguém respondia:
+
+1. **A que horas a casa encheu** — decide escala de bar e de segurança do
+   próximo evento, e hoje é estimada de cabeça.
+2. **Quanto vendi por dia** — mostra se a divulgação funcionou e quando parar
+   de gastar com ela.
+3. **Quantos compraram e não foram** — vender mil ingressos para setecentas
+   pessoas aparecerem é outro evento, e essa conta ninguém fazia.
+
+**As contas acontecem no banco, não em JavaScript.** A soma corrida de quem
+está dentro sai de um `sum() over (order by faixa)`; trazer dez mil linhas
+para somar no servidor é o tipo de coisa que funciona no teste e cai no evento
+grande.
+
+**Sem biblioteca de gráfico.** Uma `div` com largura percentual desenha o
+mesmo que centenas de kilobytes de JavaScript desenhariam — e esta tela é
+aberta às quatro da manhã, no celular, na rede da casa.
+
+**A taxa de presença arredonda para baixo.** 999 de 1000 arredondado para cima
+viraria 100% e esconderia a ausência, que é justamente o que o relatório
+existe para mostrar.
