@@ -39,8 +39,13 @@ import { unstable_cache } from 'next/cache';
 
 import { serviceDb, withTenant } from '@/db/client';
 import { events, tenants, ticketTypes, venues } from '@/db/schema';
+import { ehHostname, normalizarDominio } from '@/domain/dominio';
 import { disponivel } from '@/domain/inventory';
-import { etiquetaDeEventos, etiquetaDeTenant } from '@/lib/cache-publico';
+import {
+  etiquetaDeDominio,
+  etiquetaDeEventos,
+  etiquetaDeTenant,
+} from '@/lib/cache-publico';
 
 /**
  * 15s é o ponto de equilíbrio: derruba a carga no banco em mais de 90% numa
@@ -77,11 +82,70 @@ const VISIVEIS = ['publicado', 'esgotado'] as const;
  * visita, e é a primeira coisa que toda página pública faz. Cacheada, deixa
  * de existir como carga.
  */
+/**
+ * Resolve o produtor pelo identificador que veio na URL — ADR-018.
+ *
+ * O parâmetro é slug (`/acasa`) no domínio da plataforma, e hostname
+ * (`/ingressos.acasa.com.br`, reescrito pelo proxy) no domínio próprio do
+ * produtor. Slug nunca tem ponto, então o ponto é o que distingue os dois sem
+ * ambiguidade e sem uma consulta a mais.
+ */
+export async function resolverTenantPublico(
+  parametro: string,
+): Promise<TenantPublico | null> {
+  if (ehHostname(parametro)) return resolverTenantPorDominio(parametro);
+  return resolverTenantPorSlug(parametro);
+}
+
 export async function resolverTenantPorSlug(slug: string): Promise<TenantPublico | null> {
   return unstable_cache(() => carregarTenantPorSlug(slug), ['tenant-por-slug', slug], {
     revalidate: CACHE_TENANT_SEGUNDOS,
     tags: [etiquetaDeTenant(slug)],
   })();
+}
+
+/**
+ * Só domínio **verificado** resolve.
+ *
+ * Sem essa condição, qualquer pessoa apontaria um CNAME para nós, digitaria o
+ * domínio no cadastro e passaria a servir a vitrine de outro produtor no
+ * próprio endereço. A verificação do DNS é o que prova posse.
+ */
+export async function resolverTenantPorDominio(
+  dominio: string,
+): Promise<TenantPublico | null> {
+  const limpo = normalizarDominio(dominio);
+
+  return unstable_cache(
+    () => carregarTenantPorDominio(limpo),
+    ['tenant-por-dominio', limpo],
+    { revalidate: CACHE_TENANT_SEGUNDOS, tags: [etiquetaDeDominio(limpo)] },
+  )();
+}
+
+async function carregarTenantPorDominio(dominio: string): Promise<TenantPublico | null> {
+  const [linha] = await serviceDb()
+    .select({
+      id: tenants.id,
+      slug: tenants.slug,
+      nome: tenants.nome,
+      corAcento: tenants.corAcento,
+      logoUrl: tenants.logoUrl,
+      taxaConvenienciaBps: tenants.taxaConvenienciaBps,
+      taxaAbsorvidaPeloProdutor: tenants.taxaAbsorvidaPeloProdutor,
+      taxaMinimaCentavos: tenants.taxaMinimaCentavos,
+    })
+    .from(tenants)
+    .where(
+      and(
+        eq(tenants.dominioCustomizado, dominio),
+        eq(tenants.dominioVerificado, true),
+        eq(tenants.status, 'ativo'),
+      ),
+    )
+    .limit(1);
+
+  return linha ?? null;
 }
 
 async function carregarTenantPorSlug(slug: string): Promise<TenantPublico | null> {

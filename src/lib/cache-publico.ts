@@ -20,6 +20,11 @@ export function etiquetaDeTenant(slug: string): string {
   return `tenant:${slug}`;
 }
 
+/** Etiqueta própria: o domínio muda sem o slug mudar, e vice-versa. */
+export function etiquetaDeDominio(dominio: string): string {
+  return `dominio:${dominio}`;
+}
+
 /** A vitrine cruza produtores, então tem etiqueta própria. */
 export const ETIQUETA_VITRINE = 'vitrine';
 
@@ -43,4 +48,18 @@ export function invalidarCachePublico(tenantId: string, tenantSlug?: string): vo
   updateTag(etiquetaDeEventos(tenantId));
   updateTag(ETIQUETA_VITRINE);
   if (tenantSlug) updateTag(etiquetaDeTenant(tenantSlug));
+}
+
+/**
+ * Invalida a resolução por domínio próprio — ADR-018.
+ *
+ * Tem etiqueta própria porque o domínio muda sem o slug mudar, e vice-versa.
+ * Precisa ser chamada nas duas pontas de uma troca: o domínio antigo deixa de
+ * resolver, e o novo passa a resolver. Esquecer o antigo deixa a vitrine
+ * respondendo num endereço que o produtor já tirou do ar.
+ */
+export function invalidarDominio(...dominios: readonly (string | null)[]): void {
+  for (const d of dominios) {
+    if (d) updateTag(etiquetaDeDominio(d));
+  }
 }

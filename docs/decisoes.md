@@ -754,3 +754,114 @@ venda da ferramenta, não uma vitrine de eventos.
 **O que NÃO muda.** Nada da fundação: multi-tenant com RLS, dinheiro em
 centavos, split na PSP, máquina de estado, idempotência. O Caminho A muda a
 ordem do que se constrói em cima, não o que está embaixo.
+
+---
+
+## ADR-018 — Domínio próprio do produtor
+
+**Data:** 2026-09-14
+**Status:** aceita
+
+**Contexto.** O Caminho A (ADR-017) vende três coisas, e a primeira é *"o
+produtor mantém a própria marca"*. Sem domínio próprio isso não existe: a URL
+continua dizendo o nosso nome, e o argumento vira conversa de reunião. As
+colunas `tenants.dominio_customizado` e `dominio_verificado` existiam desde a
+Fase 0, sem nada que as usasse.
+
+### Decisão 1 — o arquivo se chama `proxy.ts`
+
+No Next 16 a convenção `middleware.ts` foi **depreciada e renomeada para
+`proxy.ts`**. Mesma função, nome novo. Está aqui porque é o tipo de coisa que
+faz alguém procurar no lugar errado por meia hora.
+
+### Decisão 2 — o proxy não consulta o banco
+
+Ele lê o `Host`, decide se é nosso, e reescreve. Nada além disso.
+
+Duas razões. A documentação do Next avisa que o proxy pode ser distribuído
+para a CDN e que não se deve depender de módulos compartilhados. E uma ida ao
+banco por requisição desfaria exatamente o trabalho de tornar a página do
+evento cacheável na borda (ADR-015) — seria trocar o gargalo de lugar.
+
+Quem resolve o tenant é a página, com o cache que ela já tem.
+
+### Decisão 3 — ponto no parâmetro significa hostname
+
+O proxy reescreve `/e/festa` para `/ingressos.acasa.com.br/e/festa`, e a rota
+`[tenantSlug]` atende os dois casos. Funciona porque **slug de produtor nunca
+tem ponto**: o `slugify` do cadastro remove tudo que não é letra, número ou
+hífen. Um parâmetro com ponto é, sem ambiguidade, um hostname.
+
+A alternativa seria duplicar as rotas da vitrine numa árvore paralela. Esta
+decisão troca um pouco de esperteza por não ter duas cópias das mesmas telas
+divergindo com o tempo.
+
+### Decisão 4 — só domínio **verificado** resolve
+
+`resolverTenantPorDominio` exige `dominio_verificado = true`. Sem isso,
+qualquer pessoa apontaria um CNAME para nós, digitaria o domínio no próprio
+cadastro, e passaria a servir a vitrine de outro produtor — ou nos deixaria
+servindo conteúdo num endereço de terceiro.
+
+O que prova posse é o CNAME: só quem tem o painel de DNS do domínio consegue
+criar o registro. Trocar o domínio **derruba a verificação**, e tem que
+derrubar: o registro do domínio novo ainda não existe.
+
+### Decisão 5 — reescreve só o que é do tenant
+
+`/` e `/e/*`. Checkout, entrar, meus-ingressos, painel e portaria continuam
+funcionando no domínio do produtor, servidos pelo código da plataforma. O
+comprador **não é jogado para fora do domínio no meio da compra**, que é onde
+se perde venda.
+
+**Consequência conhecida:** cookie de sessão é por domínio, então o comprador
+que entrou pela plataforma não está logado no domínio do produtor, e
+vice-versa. Aceitável — o acesso do comprador é por link mágico, que funciona
+igual nos dois. Se um dia incomodar, a saída é sessão por token na URL do link
+mágico, não cookie compartilhado.
+
+### Decisão 6 — no domínio do produtor, o cabeçalho é dele
+
+Busca e categorias do marketplace desaparecem. Deixá-las ali levaria o público
+da casa para eventos de terceiros — o oposto do que o produtor contratou, e
+incoerente com o Caminho A, que abandonou a vitrine agregadora.
+
+### Decisão 7 — CNAME na raiz não existe, e a tela diz isso
+
+É regra do DNS, não limitação nossa: raiz de domínio só aceita ALIAS ou ANAME,
+que nem todo provedor oferece — a Cloudflare oferece, o Registro.br não. A
+instrução muda conforme o produtor tenha escolhido subdomínio ou raiz, e a da
+raiz sugere o subdomínio pelo nome. Sem esse aviso, ele tenta, falha, e o
+suporte vira nosso.
+
+**Recomendação que a tela repete:** subdomínio, como
+`ingressos.suacasa.com.br`. Além do CNAME, o e-mail dos ingressos precisa de
+reputação própria — problema de entrega não pode contaminar o domínio
+institucional da casa.
+
+### O que foi verificado, não suposto
+
+Com o servidor de produção rodando e um `Host` forjado:
+
+| Verificação | Resultado |
+|---|---|
+| Vitrine no domínio próprio | renderiza a casa certa |
+| Página do evento no domínio próprio | renderiza, com os lotes |
+| Link do evento no domínio próprio | `/e/ensaio-geral` |
+| O mesmo link na plataforma | `/ensaio/e/ensaio-geral` |
+| `/entrar` no domínio próprio | 200, sem reescrita |
+| Categorias e busca no domínio próprio | zero |
+| Categorias e busca na plataforma | presentes |
+
+### Dívida assumida
+
+**A emissão de certificado é manual por enquanto.** O domínio precisa ser
+adicionado ao projeto na Vercel para que o TLS seja emitido. Automatizar exige
+a API da Vercel e um token guardado — trabalho que só se paga a partir de
+alguns clientes. Até lá, é um passo de onboarding.
+
+**`tests/stubs/next-cache.ts`** foi criado para que a camada de consultas
+públicas pudesse ser testada: `unstable_cache` exige contexto de requisição do
+Next e lança em Node puro. O stub não finge cachear — devolve a função como
+ela é, porque num teste de integração o que se quer verificar é a consulta ao
+banco, e um cache real esconderia mudança de dado entre um caso e o seguinte.

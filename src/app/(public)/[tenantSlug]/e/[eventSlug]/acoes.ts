@@ -14,7 +14,7 @@ import { cookieDaFila, consumirVez, estadoDaFila, temVez } from '@/lib/fila';
 import { reservarEstoque } from '@/lib/inventory';
 import { aplicarBps, repartir } from '@/lib/money';
 import { mensagemDeEspera, registrarTentativa } from '@/lib/rate-limit';
-import { configDeTaxasDoTenant, resolverTenantPorSlug } from '@/lib/public-queries';
+import { configDeTaxasDoTenant, resolverTenantPublico } from '@/lib/public-queries';
 
 /**
  * Cria o pedido e reserva o estoque — plano, seção 12.
@@ -93,7 +93,7 @@ async function montarPedido(
   const entrada = Entrada.parse({ tenantSlug, eventSlug, itens, cupom });
   const codigoCupom = entrada.cupom?.trim() || null;
 
-  const tenant = await resolverTenantPorSlug(entrada.tenantSlug);
+  const tenant = await resolverTenantPublico(entrada.tenantSlug);
   if (!tenant) throw new CompraError('Produtor não encontrado.');
 
   const taxas = await configDeTaxasDoTenant(tenant.id);

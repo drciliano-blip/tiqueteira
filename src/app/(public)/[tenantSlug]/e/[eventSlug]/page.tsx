@@ -6,10 +6,11 @@ import { Suspense } from 'react';
 import { Cabecalho } from '@/components/cabecalho';
 import { Cartaz } from '@/components/cartaz';
 import { Rodape } from '@/components/rodape';
+import { baseDoTenant } from '@/domain/dominio';
 import { SeletorIngressos } from '@/components/seletor-ingressos';
 import { TemaTenant } from '@/components/tema-tenant';
 import { dataLonga, hora } from '@/lib/datas';
-import { buscarEventoPublico, resolverTenantPorSlug } from '@/lib/public-queries';
+import { buscarEventoPublico, resolverTenantPublico } from '@/lib/public-queries';
 import { criarPedido } from './acoes';
 
 /**
@@ -46,7 +47,7 @@ type Props = { params: Promise<{ tenantSlug: string; eventSlug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { tenantSlug, eventSlug } = await params;
-  const tenant = await resolverTenantPorSlug(tenantSlug);
+  const tenant = await resolverTenantPublico(tenantSlug);
   if (!tenant) return { title: 'Evento não encontrado' };
 
   const evento = await buscarEventoPublico(tenant.id, eventSlug);
@@ -66,8 +67,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function PaginaEvento({ params }: Props) {
   const { tenantSlug, eventSlug } = await params;
+  const base = baseDoTenant(tenantSlug);
 
-  const tenant = await resolverTenantPorSlug(tenantSlug);
+  const tenant = await resolverTenantPublico(tenantSlug);
   if (!tenant) notFound();
 
   const evento = await buscarEventoPublico(tenant.id, eventSlug);
@@ -84,7 +86,12 @@ export default async function PaginaEvento({ params }: Props) {
 
       <div className="flex min-h-dvh flex-col">
         <Suspense fallback={<div className="h-16 border-b border-line" />}>
-          <Cabecalho comCategorias={false} />
+          {/*
+            No domínio do produtor o cabeçalho é dele, não nosso — ADR-018.
+            Busca e categorias do marketplace ali levariam o público da casa
+            para eventos de terceiros, que é o oposto do que ele contratou.
+          */}
+          <Cabecalho comBusca={base !== ''} comCategorias={false} />
         </Suspense>
 
         <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-10 pt-6">
@@ -95,7 +102,7 @@ export default async function PaginaEvento({ params }: Props) {
               Início
             </Link>
             <span aria-hidden>/</span>
-            <Link href={`/${tenant.slug}`} className="transition hover:text-txt">
+            <Link href={base || `/${tenant.slug}`} className="transition hover:text-txt">
               {tenant.nome}
             </Link>
           </nav>

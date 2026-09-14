@@ -5,8 +5,9 @@ import { Suspense } from 'react';
 import { Cabecalho } from '@/components/cabecalho';
 import { CartaoEvento } from '@/components/cartao-evento';
 import { Rodape } from '@/components/rodape';
+import { baseDoTenant } from '@/domain/dominio';
 import { TemaTenant } from '@/components/tema-tenant';
-import { listarEventosDoTenant, resolverTenantPorSlug } from '@/lib/public-queries';
+import { listarEventosDoTenant, resolverTenantPublico } from '@/lib/public-queries';
 
 export const revalidate = 30;
 
@@ -14,7 +15,7 @@ type Props = { params: Promise<{ tenantSlug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { tenantSlug } = await params;
-  const tenant = await resolverTenantPorSlug(tenantSlug);
+  const tenant = await resolverTenantPublico(tenantSlug);
   if (!tenant) return { title: 'Produtor não encontrado' };
 
   return {
@@ -26,8 +27,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function VitrineProdutor({ params }: Props) {
   const { tenantSlug } = await params;
+  const base = baseDoTenant(tenantSlug);
 
-  const tenant = await resolverTenantPorSlug(tenantSlug);
+  const tenant = await resolverTenantPublico(tenantSlug);
   if (!tenant) notFound();
 
   const eventos = await listarEventosDoTenant(tenant.id);
@@ -45,7 +47,12 @@ export default async function VitrineProdutor({ params }: Props) {
           comprador achar que saiu do lugar onde estava comprando.
         */}
         <Suspense fallback={<div className="h-16 border-b border-line" />}>
-          <Cabecalho />
+          {/*
+            No domínio do produtor o cabeçalho é dele, não nosso — ADR-018.
+            Busca e categorias do marketplace ali levariam o público da casa
+            para eventos de terceiros, que é o oposto do que ele contratou.
+          */}
+          <Cabecalho comBusca={base !== ''} comCategorias={base !== ''} />
         </Suspense>
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
@@ -88,7 +95,7 @@ export default async function VitrineProdutor({ params }: Props) {
                       <li key={evento.id}>
                         <CartaoEvento
                           evento={evento}
-                          tenantSlug={tenant.slug}
+                          base={base}
                           prioridade={i < 4}
                         />
                       </li>
@@ -105,7 +112,7 @@ export default async function VitrineProdutor({ params }: Props) {
                   <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
                     {esgotados.map((evento) => (
                       <li key={evento.id}>
-                        <CartaoEvento evento={evento} tenantSlug={tenant.slug} />
+                        <CartaoEvento evento={evento} base={base} />
                       </li>
                     ))}
                   </ul>

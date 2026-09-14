@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 
 import { estadoDaFila } from '@/lib/fila';
-import { buscarEventoPublico, resolverTenantPorSlug } from '@/lib/public-queries';
+import { buscarEventoPublico, resolverTenantPublico } from '@/lib/public-queries';
 import { SalaDeEspera } from './sala-de-espera';
 
 export const metadata: Metadata = {
@@ -21,7 +21,7 @@ type Props = { params: Promise<{ tenantSlug: string; eventSlug: string }> };
 export default async function Fila({ params }: Props) {
   const { tenantSlug, eventSlug } = await params;
 
-  const tenant = await resolverTenantPorSlug(tenantSlug);
+  const tenant = await resolverTenantPublico(tenantSlug);
   if (!tenant) notFound();
 
   const evento = await buscarEventoPublico(tenant.id, eventSlug);

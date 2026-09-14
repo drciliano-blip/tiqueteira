@@ -333,7 +333,7 @@ domínio e pulou para a frente.
 | 3 | 21 área do comprador e transferência | completo |
 | 3 | 22 conferência de documento | completo |
 | 4 | 23 QR dinâmico rotativo | não |
-| 4 | **24 domínio customizado** | **só o esquema; sem roteamento por hostname** |
+| 4 | **24 domínio customizado** | **entregue** — proxy por hostname, verificação de CNAME e tela do produtor (ADR-018). Falta só a emissão automática de certificado |
 
 **A seção 19 do plano está desatualizada:** a fila virtual aparece na Fase 4 e
 já está entregue (ADR-014).
@@ -355,13 +355,11 @@ produtor**.
 
 A ordem abaixo considera o Caminho A e o que **não** depende da PSP.
 
-### 1º — Prompt 24: domínio customizado por CNAME
+### ~~1º — Prompt 24: domínio customizado~~ — ENTREGUE em 14/09/2026
 
-É a pedra angular do Caminho A. Sem ele, "o produtor mantém a própria marca"
-não existe: a URL continua dizendo o nosso nome. Independente da PSP,
-autocontido, e o esquema (`tenants.dominio_customizado`,
-`dominio_verificado`) já está pronto. Falta o middleware de roteamento por
-hostname, a verificação do CNAME e a emissão de certificado.
+Proxy por hostname, resolução de tenant por domínio verificado, verificação de
+CNAME e tela do produtor. Ver ADR-018. **Pendência:** a emissão de certificado
+ainda é manual (adicionar o domínio ao projeto na Vercel).
 
 ### 2º — Prompt 15: motor de repasse
 

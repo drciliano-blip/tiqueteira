@@ -26,12 +26,20 @@ export type EventoCartao = {
  */
 export function CartaoEvento({
   evento,
-  tenantSlug,
+  base,
   tenantNome,
   prioridade = false,
 }: {
   evento: EventoCartao;
-  tenantSlug: string;
+  /**
+   * Prefixo do link — ADR-018.
+   *
+   * `/acasa` no domínio da plataforma, vazio no domínio próprio do
+   * produtor. Receber o slug pronto aqui montaria `/acasa/e/festa` na
+   * barra de endereço do produtor, que é o nosso nome aparecendo onde ele
+   * pagou para não aparecer.
+   */
+  base: string;
   tenantNome?: string;
   prioridade?: boolean;
 }) {
@@ -39,7 +47,7 @@ export function CartaoEvento({
 
   return (
     <Link
-      href={`/${tenantSlug}/e/${evento.slug}`}
+      href={`${base}/e/${evento.slug}`}
       className="group block"
       aria-label={`${evento.titulo}, ${dataCurta(evento.dataInicio)}`}
     >

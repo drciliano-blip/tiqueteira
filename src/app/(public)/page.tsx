@@ -108,7 +108,7 @@ export default async function Home({ searchParams }: Props) {
                 <li key={evento.id}>
                   <CartaoEvento
                     evento={evento}
-                    tenantSlug={evento.tenantSlug}
+                    base={`/${evento.tenantSlug}`}
                     tenantNome={evento.tenantNome}
                     prioridade={i < 4}
                   />
@@ -152,7 +152,7 @@ export default async function Home({ searchParams }: Props) {
                 <li key={evento.id}>
                   <CartaoEvento
                     evento={evento}
-                    tenantSlug={evento.tenantSlug}
+                    base={`/${evento.tenantSlug}`}
                     tenantNome={evento.tenantNome}
                     prioridade={!maisVendidos.length && i < 4}
                   />
