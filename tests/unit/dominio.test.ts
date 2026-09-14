@@ -10,7 +10,7 @@ import {
   validarDominio,
 } from '@/domain/dominio';
 
-const CANONICO = 'tiqueteira.com.br';
+const CANONICO = ['yourticket.com.br'];
 
 /**
  * O roteamento por hostname é a peça mais perigosa desta feature: um erro
@@ -43,8 +43,8 @@ describe('baseDoTenant', () => {
 
 describe('ehHostDaPlataforma', () => {
   it('reconhece o domínio canônico, com e sem porta', () => {
-    expect(ehHostDaPlataforma('tiqueteira.com.br', CANONICO)).toBe(true);
-    expect(ehHostDaPlataforma('TIQUETEIRA.COM.BR:443', CANONICO)).toBe(true);
+    expect(ehHostDaPlataforma('yourticket.com.br', CANONICO)).toBe(true);
+    expect(ehHostDaPlataforma('YOURTICKET.COM.BR:443', CANONICO)).toBe(true);
   });
 
   it('reconhece desenvolvimento', () => {
@@ -63,7 +63,7 @@ describe('ehHostDaPlataforma', () => {
 
   it('não cai em domínio que só TERMINA parecido', () => {
     // `falsotiqueteira.com.br` não é `tiqueteira.com.br`.
-    expect(ehHostDaPlataforma('falsotiqueteira.com.br', CANONICO)).toBe(false);
+    expect(ehHostDaPlataforma('falsoyourticket.com.br', CANONICO)).toBe(false);
   });
 });
 
@@ -109,10 +109,10 @@ describe('validarDominio', () => {
   it('recusa o domínio da própria plataforma', () => {
     // Um produtor apontando um subdomínio nosso para si mesmo sequestraria a
     // plataforma para quem acessasse por ali.
-    expect(validarDominio('tiqueteira.com.br', CANONICO)).toMatchObject({
+    expect(validarDominio('yourticket.com.br', CANONICO)).toMatchObject({
       motivo: 'nosso_dominio',
     });
-    expect(validarDominio('qualquer.tiqueteira.com.br', CANONICO)).toMatchObject({
+    expect(validarDominio('qualquer.yourticket.com.br', CANONICO)).toMatchObject({
       motivo: 'nosso_dominio',
     });
     expect(validarDominio('produtor.vercel.app', CANONICO)).toMatchObject({
@@ -159,5 +159,30 @@ describe('apontaParaNos', () => {
 
   it('recusa quando não há registro nenhum', () => {
     expect(apontaParaNos([], 'cname.vercel-dns.com')).toBe(false);
+  });
+});
+
+describe('www', () => {
+  it('www do domínio canônico é a plataforma, não um produtor', () => {
+    // Sem isto, quem digita `www.` cai na busca por um produtor com esse
+    // domínio e leva 404 — sem ter como saber que o problema foi o `www`.
+    expect(ehHostDaPlataforma('www.yourticket.com.br', CANONICO)).toBe(true);
+  });
+
+  it('funciona também quando o canônico é que tem www', () => {
+    expect(ehHostDaPlataforma('yourticket.com.br', ['www.yourticket.com.br'])).toBe(true);
+  });
+
+  it('reconhece qualquer host da lista, não só o primeiro', () => {
+    // É o que torna a virada de DNS um não-evento: a variável ainda aponta
+    // para o endereço antigo, e o domínio novo já é reconhecido como nosso.
+    const duasFontes = ['tiqueteira.vercel.app', 'yourticket.com.br'];
+    expect(ehHostDaPlataforma('yourticket.com.br', duasFontes)).toBe(true);
+    expect(ehHostDaPlataforma('tiqueteira.vercel.app', duasFontes)).toBe(true);
+    expect(ehHostDaPlataforma('acasa.com.br', duasFontes)).toBe(false);
+  });
+
+  it('não confunde www de outro domínio', () => {
+    expect(ehHostDaPlataforma('www.acasa.com.br', CANONICO)).toBe(false);
   });
 });

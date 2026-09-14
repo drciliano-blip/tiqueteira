@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { ehHostDaPlataforma } from '@/domain/dominio';
+import { OPERADOR } from '@/lib/operador';
 
 /**
  * Roteamento por domínio próprio do produtor — ADR-018.
@@ -33,9 +34,15 @@ function ehCaminhoDoTenant(pathname: string): boolean {
 
 export function proxy(request: NextRequest): NextResponse {
   const host = request.headers.get('host') ?? '';
-  const canonico = new URL(
-    process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
-  ).host;
+  /**
+   * Duas fontes: a variável de ambiente, que muda por deploy, e o domínio
+   * institucional, que é constante do código. Assim a virada de DNS não
+   * depende de alguém lembrar de atualizar a variável primeiro.
+   */
+  const nossos = [
+    new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').host,
+    OPERADOR.dominio,
+  ];
 
   /**
    * Na dúvida, não reescreve. Errar para este lado é barato — o site
@@ -43,7 +50,7 @@ export function proxy(request: NextRequest): NextResponse {
    * inteira, porque toda requisição passaria a procurar um tenant que não
    * existe.
    */
-  if (!host || ehHostDaPlataforma(host, canonico)) return NextResponse.next();
+  if (!host || ehHostDaPlataforma(host, nossos)) return NextResponse.next();
 
   const { pathname, search } = request.nextUrl;
   if (!ehCaminhoDoTenant(pathname)) return NextResponse.next();

@@ -35,18 +35,39 @@ export function baseDoTenant(parametro: string): string {
 /**
  * Hosts que NUNCA são domínio de produtor.
  *
+ * Recebe uma **lista** de propósito, e não um host só. O host canônico vem da
+ * variável de ambiente, que muda por deploy; o domínio institucional é
+ * constante do código. Consultar os dois torna a virada de DNS um não-evento:
+ * no minuto em que o domínio novo começar a resolver, ele já é reconhecido
+ * como nosso, mesmo que a variável ainda aponte para o endereço antigo.
+ *
  * Errar para o lado de não reescrever é barato: o site funciona pelo caminho
  * normal. Errar para o outro lado derruba a plataforma inteira, porque toda
  * requisição passaria a procurar um tenant que não existe.
  */
-export function ehHostDaPlataforma(host: string, hostCanonico: string): boolean {
+export function ehHostDaPlataforma(
+  host: string,
+  hostsDaPlataforma: readonly string[],
+): boolean {
   const limpo = semPorta(host);
 
-  if (limpo === semPorta(hostCanonico)) return true;
   if (limpo === 'localhost' || limpo === '127.0.0.1' || limpo === '[::1]') return true;
 
   // Pré-visualizações e o domínio de produção da Vercel.
   if (limpo.endsWith('.vercel.app')) return true;
+
+  for (const bruto of hostsDaPlataforma) {
+    const nosso = semPorta(bruto);
+    if (!nosso) continue;
+    if (limpo === nosso) return true;
+
+    /**
+     * `www` é a mesma casa. Sem isto, quem digitasse `www.yourticket.com.br`
+     * cairia na busca por um produtor com esse domínio e levaria 404 — e a
+     * pessoa não tem como saber que o problema foi o `www`.
+     */
+    if (limpo === 'www.' + nosso || nosso === 'www.' + limpo) return true;
+  }
 
   return false;
 }
@@ -86,7 +107,10 @@ export type ValidacaoDominio =
 /** `ingressos.acasa.com.br` — letras, números, hífen e ponto. */
 const FORMATO = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
-export function validarDominio(bruto: string, hostCanonico: string): ValidacaoDominio {
+export function validarDominio(
+  bruto: string,
+  hostsDaPlataforma: readonly string[],
+): ValidacaoDominio {
   const dominio = normalizarDominio(bruto);
 
   if (dominio.length === 0) {
@@ -121,8 +145,12 @@ export function validarDominio(bruto: string, hostCanonico: string): ValidacaoDo
    * Um produtor apontando um subdomínio nosso para si mesmo sequestraria a
    * plataforma para quem acessasse por ali.
    */
-  const canonico = normalizarDominio(hostCanonico);
-  if (dominio === canonico || dominio.endsWith('.' + canonico) || dominio.endsWith('.vercel.app')) {
+  const nossos = hostsDaPlataforma.map(normalizarDominio).filter(Boolean);
+  const ehNosso =
+    dominio.endsWith('.vercel.app') ||
+    nossos.some((n) => dominio === n || dominio.endsWith('.' + n));
+
+  if (ehNosso) {
     return {
       valido: false,
       motivo: 'nosso_dominio',

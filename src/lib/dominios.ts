@@ -26,6 +26,7 @@ import {
 } from '@/domain/dominio';
 import { invalidarCachePublico, invalidarDominio } from '@/lib/cache-publico';
 import { env } from '@/lib/env';
+import { OPERADOR } from '@/lib/operador';
 
 /**
  * Para onde o produtor aponta o CNAME.
@@ -36,8 +37,9 @@ import { env } from '@/lib/env';
  */
 export const ALVO_CNAME = 'cname.vercel-dns.com';
 
-function hostCanonico(): string {
-  return new URL(env().NEXT_PUBLIC_APP_URL).host;
+/** Ver `ehHostDaPlataforma`: o domínio institucional entra junto da variável. */
+function hostsDaPlataforma(): string[] {
+  return [new URL(env().NEXT_PUBLIC_APP_URL).host, OPERADOR.dominio];
 }
 
 export type EstadoDominio = {
@@ -83,7 +85,7 @@ export async function definirDominio(
   tenantId: string,
   bruto: string,
 ): Promise<ResultadoDominio> {
-  const validacao = validarDominio(bruto, hostCanonico());
+  const validacao = validarDominio(bruto, hostsDaPlataforma());
   if (!validacao.valido) return { ok: false, erro: validacao.explicacao };
 
   const { dominio } = validacao;
