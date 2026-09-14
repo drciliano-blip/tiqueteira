@@ -19,7 +19,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: { default: 'Tiqueteira', template: '%s · Tiqueteira' },
+  title: { default: 'YourTicket', template: '%s · YourTicket' },
   description: 'Ingressos para os melhores eventos.',
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Portaria' },

@@ -121,12 +121,12 @@ async function seed() {
   // Usuários e vínculos
   // -------------------------------------------------------------------------
   console.log('Usuários...');
-  const senha = await hashPassword('tiqueteira-dev-123');
+  const senha = await hashPassword('yourticket-dev-123');
 
   const [admin, produtorA, produtorB, portaria] = await db
     .insert(schema.users)
     .values([
-      { email: 'admin@tiqueteira.local', nome: 'Operador da Plataforma', senhaHash: senha },
+      { email: 'admin@yourticket.local', nome: 'Operador da Plataforma', senhaHash: senha },
       { email: 'ana@complexojussara.com.br', nome: 'Ana Ribeiro', senhaHash: senha },
       { email: 'bruno@fabrique.com.br', nome: 'Bruno Tavares', senhaHash: senha },
       { email: 'portaria@complexojussara.com.br', nome: 'Equipe de Portaria', senhaHash: senha },
@@ -641,7 +641,7 @@ async function seed() {
   ]);
 
   console.log('\nPronto.');
-  console.log('  Login: admin@tiqueteira.local / tiqueteira-dev-123');
+  console.log('  Login: admin@yourticket.local / yourticket-dev-123');
   console.log('  Produtor A: ana@complexojussara.com.br');
   console.log('  Produtor B: bruno@fabrique.com.br');
 }

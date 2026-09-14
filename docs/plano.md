@@ -1,4 +1,4 @@
-# Projeto Tiqueteira — Plano de Execução
+# Projeto YourTicket — Plano de Execução
 
 Plataforma de venda de ingressos multi-tenant, integrada ao dashboard existente do grupo de espaços de eventos, para que os produtores clientes operem a venda dos próprios eventos.
 

@@ -7,10 +7,18 @@
  */
 export const OPERADOR = {
   razaoSocial: 'CR ADMINISTRACAO E PARTICIPACOES LTDA',
-  nomeFantasia: 'Tiqueteira',
+  nomeFantasia: 'YourTicket',
   cnpj: '47301164000112',
   cnpjFormatado: '47.301.164/0001-12',
-  email: 'contato@tiqueteira.app',
-  /** Máximo de 22 caracteres — limite do descritor na fatura do cartão. */
-  descritorFatura: 'TIQUETEIRA',
+  /** Domínio canônico da plataforma. */
+  dominio: 'yourticket.com.br',
+  email: 'contato@yourticket.com.br',
+  /**
+   * Máximo de 22 caracteres — limite do descritor na fatura do cartão.
+   *
+   * Precisa ser o nome que o comprador reconhece. Nome desconhecido na
+   * fatura é uma das causas mais comuns de contestação de cartão, e
+   * contestação custa mais que a venda (ADR-010).
+   */
+  descritorFatura: 'YOURTICKET',
 } as const;

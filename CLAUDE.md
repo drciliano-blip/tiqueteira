@@ -1,4 +1,4 @@
-# Tiqueteira — Contexto do Projeto
+# YourTicket — Contexto do Projeto
 
 @AGENTS.md
 

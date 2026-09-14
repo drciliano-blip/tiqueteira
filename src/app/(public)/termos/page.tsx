@@ -7,7 +7,7 @@ import { OPERADOR } from '@/lib/operador';
 
 export const metadata: Metadata = {
   title: 'Termos de uso',
-  description: 'Condições de uso da plataforma Tiqueteira.',
+  description: 'Condições de uso da plataforma YourTicket.',
 };
 
 /**
@@ -39,7 +39,7 @@ export default function Termos() {
           <section>
             <h2 className="font-titulo text-lg font-bold text-txt">1. Quem somos</h2>
             <p className="mt-2">
-              A Tiqueteira é uma plataforma de intermediação de venda de ingressos operada por{' '}
+              A YourTicket é uma plataforma de intermediação de venda de ingressos operada por{' '}
               <strong className="text-txt">{OPERADOR.razaoSocial}</strong>, inscrita no CNPJ sob o
               nº {OPERADOR.cnpjFormatado}.
             </p>

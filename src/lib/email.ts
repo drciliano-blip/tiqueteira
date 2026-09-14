@@ -29,7 +29,15 @@ export type ResultadoEnvio =
   | { ok: true; id: string; simulado: boolean }
   | { ok: false; erro: string; retryable: boolean };
 
-const REMETENTE_PADRAO = 'Tiqueteira <onboarding@resend.dev>';
+/**
+ * Remetente de último recurso, para desenvolvimento.
+ *
+ * `onboarding@resend.dev` é o domínio de teste do Resend e só entrega para
+ * o dono da conta. Em produção, `MAIL_FROM` precisa apontar para um
+ * subdomínio próprio com SPF, DKIM e DMARC — senão o ingresso cai no spam,
+ * que é o pior suporte possível.
+ */
+const REMETENTE_PADRAO = 'YourTicket <onboarding@resend.dev>';
 
 export async function enviarEmail(mensagem: Mensagem): Promise<ResultadoEnvio> {
   const chave = process.env.RESEND_API_KEY;

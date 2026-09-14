@@ -1,5 +1,5 @@
 /**
- * Schema do banco — Tiqueteira.
+ * Schema do banco — YourTicket.
  *
  * Convenções (ver docs/plano.md, seção 7):
  * - identificadores `uuid`

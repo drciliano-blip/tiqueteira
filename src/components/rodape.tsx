@@ -5,7 +5,7 @@ export function Rodape() {
     <footer className="mt-16 border-t border-line">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:grid-cols-3">
         <div>
-          <p className="font-titulo font-bold">Tiqueteira</p>
+          <p className="font-titulo font-bold">YourTicket</p>
           <p className="prosa mt-2 text-sm text-faint">
             Plataforma de venda de ingressos para casas e produtores.
           </p>
@@ -54,7 +54,7 @@ export function Rodape() {
           <Link href="/privacidade" className="transition hover:text-muted">
             Política de privacidade
           </Link>
-          <span className="ml-auto">© {new Date().getFullYear()} Tiqueteira</span>
+          <span className="ml-auto">© {new Date().getFullYear()} YourTicket</span>
         </div>
       </div>
     </footer>

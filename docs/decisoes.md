@@ -865,3 +865,61 @@ públicas pudesse ser testada: `unstable_cache` exige contexto de requisição d
 Next e lança em Node puro. O stub não finge cachear — devolve a função como
 ela é, porque num teste de integração o que se quer verificar é a consulta ao
 banco, e um cache real esconderia mudança de dado entre um caso e o seguinte.
+
+---
+
+## ADR-019 — Marca e domínio canônico: YourTicket
+
+**Data:** 2026-09-14
+**Status:** aceita
+
+**Decisão.** A plataforma chama-se **YourTicket** e o domínio canônico é
+**`yourticket.com.br`**.
+
+**O que NÃO muda.** A pessoa jurídica continua sendo **CR ADMINISTRACAO E
+PARTICIPACOES LTDA**, CNPJ 47.301.164/0001-12 (ADR-010). YourTicket é nome
+fantasia — é ele que aparece para o comprador; é a CR que assina contrato,
+abre cadastro na PSP e emite nota.
+
+**Consequências aplicadas:**
+
+| Onde | Antes | Agora |
+|---|---|---|
+| Marca visível, título, rodapé | Tiqueteira | YourTicket |
+| Descritor de fatura do cartão | `TIQUETEIRA` | `YOURTICKET` |
+| E-mail do operador | `contato@tiqueteira.app` | `contato@yourticket.com.br` |
+| Termos e política de privacidade | Tiqueteira | YourTicket |
+
+**O descritor de fatura é o item menos óbvio e o mais caro de errar.** ADR-010
+já registrava: nome desconhecido na fatura é uma das causas mais comuns de
+contestação de cartão, e contestação custa mais que a venda. `YOURTICKET` cabe
+no limite de 22 caracteres e é o nome que o comprador vai ter visto no
+checkout.
+
+**Os papéis de banco continuam `tiqueteira_app` e `tiqueteira_service`.**
+Renomeá-los exigiria migration, rotação de senha e reaplicação da RLS, com
+risco real de derrubar o acesso — em troca de zero ganho visível, porque
+nenhum comprador ou produtor vê nome de papel de Postgres. O mesmo vale para o
+projeto no Supabase e o subdomínio `.vercel.app`: são identificadores
+internos.
+
+Duas ocorrências da palavra "tiqueteira" em minúscula continuam no código, e
+estão certas: ali ela é substantivo comum — *"uma tiqueteira white-label não
+pode ter uma cor só"* — e não a marca.
+
+**Pendências que isto cria, e nenhuma é código:**
+
+1. **Registrar o nome fantasia** YourTicket na Junta Comercial, vinculado ao
+   CNPJ. Sem isso, o nome na nota e o nome na fatura divergem do que o
+   comprador viu — que é exatamente a divergência que gera contestação.
+2. **Comprar `yourticket.com.br` no Registro.br** (é o único caminho para
+   `.com.br`, e exige CNPJ — que existe).
+3. **Configurar `NEXT_PUBLIC_APP_URL`** como `https://yourticket.com.br` nos
+   três ambientes da Vercel. Este valor alimenta o proxy de domínio próprio
+   (ADR-018): é ele que decide o que é domínio nosso e o que é domínio de
+   produtor. Errar aqui faz **toda** requisição procurar um tenant que não
+   existe.
+4. **E-mail transacional em subdomínio próprio** — `ingressos.yourticket.com.br`
+   ou similar, com SPF, DKIM e DMARC. Hoje o remetente padrão é o domínio de
+   teste do Resend, que só entrega para o dono da conta. Ingresso no spam é o
+   pior suporte possível.

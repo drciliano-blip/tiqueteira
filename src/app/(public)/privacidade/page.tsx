@@ -7,7 +7,7 @@ import { OPERADOR } from '@/lib/operador';
 
 export const metadata: Metadata = {
   title: 'Política de privacidade',
-  description: 'Como a Tiqueteira trata os dados de quem compra ingresso.',
+  description: 'Como a YourTicket trata os dados de quem compra ingresso.',
 };
 
 /**
@@ -41,7 +41,7 @@ export default function Privacidade() {
             <h2 className="font-titulo text-lg font-bold text-txt">1. Quem trata seus dados</h2>
             <p className="mt-2">
               <strong className="text-txt">{OPERADOR.razaoSocial}</strong>, CNPJ{' '}
-              {OPERADOR.cnpjFormatado}, operadora da plataforma Tiqueteira.
+              {OPERADOR.cnpjFormatado}, operadora da plataforma YourTicket.
             </p>
           </section>
 

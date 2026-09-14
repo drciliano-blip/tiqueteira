@@ -1,4 +1,4 @@
-# Benchmark e Direção de Design — Tiqueteira
+# Benchmark e Direção de Design — YourTicket
 
 Documento complementar ao `docs/plano.md`.
 

@@ -41,7 +41,7 @@ if (!segredo) throw new Error('Defina TICKET_HMAC_SECRET em .env.local');
 const sql = postgres(url, { max: 1, prepare: false });
 const db = drizzle(sql, { schema });
 
-const SENHA = 'tiqueteira-dev-123';
+const SENHA = 'yourticket-dev-123';
 const SLUG = 'ensaio';
 const QUANTOS = 50;
 
@@ -113,7 +113,7 @@ async function main() {
     .values({
       slug: SLUG,
       nome: 'Casa do Ensaio',
-      email: 'ensaio@tiqueteira.local',
+      email: 'ensaio@yourticket.local',
       taxaConvenienciaBps: 1000,
       comissaoBps: 500,
       taxaFixaCentavos: 100,

@@ -9,7 +9,7 @@ export function Marca({ href = '/' }: { href?: string }) {
       >
         T
       </span>
-      <span className="text-[15px]">Tiqueteira</span>
+      <span className="text-[15px]">YourTicket</span>
     </Link>
   );
 }
