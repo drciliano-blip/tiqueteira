@@ -2,8 +2,13 @@
 
 @AGENTS.md
 
-Leia também `docs/plano.md`. Ele é a especificação; este arquivo é o resumo
-operacional. Decisões tomadas durante a construção ficam em `docs/decisoes.md`.
+**Comece por `docs/estado-atual.md`.** É a fotografia do projeto agora: o que
+existe, o que falta, onde estamos no roadmap e o que depende de decisão humana.
+
+Depois: `docs/plano.md` é a especificação; este arquivo é o resumo operacional.
+Decisões tomadas durante a construção ficam em `docs/decisoes.md` — a mais
+recente, ADR-017, define a estratégia de produto (white-label, não marketplace)
+e reordena o roadmap.
 
 ## O que é
 Marketplace de ingressos multi-tenant. O operador da plataforma é

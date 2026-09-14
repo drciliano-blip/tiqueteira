@@ -684,3 +684,73 @@ aberta às quatro da manhã, no celular, na rede da casa.
 **A taxa de presença arredonda para baixo.** 999 de 1000 arredondado para cima
 viraria 100% e esconderia a ausência, que é justamente o que o relatório
 existe para mostrar.
+
+---
+
+## ADR-017 — Caminho A: infraestrutura white-label, não marketplace
+
+**Data:** 2026-09-14
+**Status:** aceita
+
+**Contexto.** Havia duas estratégias possíveis para a plataforma, e elas puxam
+o produto para lados opostos:
+
+- **Marketplace de descoberta** — a plataforma tem público próprio, e o
+  produtor vende para essa audiência. É o modelo da Sympla e da Ticket360.
+  Exige investimento contínuo em SEO, em tráfego pago e em uma vitrine
+  agregadora; a competição é por audiência, contra quem já tem dez anos de
+  vantagem e um domínio consolidado.
+- **Infraestrutura white-label** — a plataforma é o sistema por trás de casas
+  e espaços que **já têm público próprio**. A competição não é por audiência;
+  é por qualidade de ferramenta e por relação.
+
+**Decisão.** Caminho A: infraestrutura white-label.
+
+O argumento de venda tem três partes, e todas as três têm consequência técnica:
+
+1. **O produtor mantém a própria marca.** O ingresso, a página e o e-mail
+   parecem dele, não nossos.
+2. **O produtor é dono dos próprios dados.** A base de compradores é dele, e
+   ele leva embora quando quiser.
+3. **Atendimento próximo.** Não competimos em escala de suporte; competimos em
+   proximidade.
+
+**Por que esta é a leitura honesta da nossa posição.** Não temos audiência e
+não vamos ter tão cedo. Construir vitrine agregadora e SEO seria gastar o
+único recurso escasso — tempo — disputando exatamente o terreno onde a
+vantagem do incumbente é maior. Já a ferramenta é terreno onde a vantagem
+deles é pequena: o produto da Sympla é o mesmo para um festival de dez mil
+pessoas e para um sarau de cinquenta.
+
+**O que isto promove no roadmap** (da Fase 4 para a Fase 3):
+
+| O quê | Por que sobe |
+|---|---|
+| **Domínio customizado por CNAME** | Sem ele, "marca própria" é conversa: a URL continua dizendo o nosso nome. É o item que sustenta o argumento nº 1, e hoje só existe no esquema (`tenants.dominio_customizado`), sem roteamento |
+| **Acento visual por tenant** | Benchmark, seção 4.2. **Já está implementado** — `tenants.cor_acento` injetado por `TemaTenant`. Sobe para a Fase 3 apenas como requisito explícito, não como trabalho |
+| **Exportação da base em CSV e público recorrente** | É o argumento nº 2 transformado em botão. Na Sympla a base pertence à plataforma; aqui ela pertence ao produtor, e isso precisa ser demonstrável, não prometido |
+| **Onboarding self-service** | Cadastro, KYC pela API da PSP e primeiro evento publicado sem intervenção humana. Sem isso, cada cliente novo é trabalho nosso — e o modelo não escala para dezenas de casas |
+| **Autoatendimento do comprador** | Reembolso, ingresso não recebido e troca de titularidade respondem por quase todo o suporte. Num modelo de proximidade, o suporte que não escala é o que mata a margem |
+
+**O que sai do escopo:**
+
+- **Mapa de assentos complexo.** Casa noturna e festival vendem por setor, não
+  por poltrona. Entra se e quando aparecer um cliente de teatro.
+- **App nativo.** A portaria já funciona offline como PWA — que foi medido:
+  validação local em 5 µs contra manifesto de 5 mil ingressos (ADR-013). App
+  nativo acrescentaria loja, revisão e duas bases de código para resolver um
+  problema que já está resolvido.
+- **SEO e descoberta de marketplace.** É a disputa que decidimos não comprar.
+- **Vitrine agregadora de todos os produtores.** A vitrine **por produtor**
+  (`/[tenantSlug]`) continua e é essencial. O que sai é a página que junta
+  todos, que só faz sentido para quem tem audiência própria.
+
+**Consequência que vale registrar.** A página inicial e as consultas de
+marketplace (`src/lib/marketplace-queries.ts`) foram construídas para o modelo
+que estamos abandonando. Elas não atrapalham, mas deixam de receber
+investimento — e a home passa a ser, na prática, uma página institucional de
+venda da ferramenta, não uma vitrine de eventos.
+
+**O que NÃO muda.** Nada da fundação: multi-tenant com RLS, dinheiro em
+centavos, split na PSP, máquina de estado, idempotência. O Caminho A muda a
+ordem do que se constrói em cima, não o que está embaixo.
