@@ -7,6 +7,7 @@ import { enviarIngressos, type PayloadEnvio } from '@/jobs/enviar-ingressos';
 import { conciliarPedidos } from '@/jobs/conciliacao';
 import { reembolsarPagamentosAtrasados } from '@/jobs/reembolso-atrasado';
 import { devolverPedidosExpirados } from '@/jobs/expirar-reservas';
+import { agendarRepassesPendentes, executarRepassesVencidos } from '@/lib/payouts';
 import { env } from '@/lib/env';
 
 /**
@@ -25,6 +26,7 @@ const NOMES: NomeJob[] = [
   'reembolso-automatico',
   'pagamento-atrasado',
   'conciliacao',
+  'repasses',
 ];
 
 /** Comparação em tempo constante: `===` vaza o prefixo acertado pelo tempo. */
@@ -74,6 +76,18 @@ export async function POST(
       console.error('[conciliacao] divergências', relatorio.divergencias);
     }
     return NextResponse.json(relatorio);
+  }
+
+  /**
+   * Motor de repasse (ADR-021). Varredura, não fila: a tabela `payouts` já é
+   * a fila — cada linha tem data prevista, status e tentativas.
+   */
+  if (nome === 'repasses') {
+    const agendados = await agendarRepassesPendentes();
+    const executados = await executarRepassesVencidos();
+    const falhas = executados.filter((r) => r.status === 'failed');
+    if (falhas.length > 0) console.error('[repasses] falhas', falhas);
+    return NextResponse.json({ agendados, executados });
   }
 
   const pendentes = await reservarJobs(nome as NomeJob);

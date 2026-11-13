@@ -994,3 +994,110 @@ o site continua com `contato@yourticket.com.br`.
    recebedor na PSP.
 5. **Domínio `yourticket.com.br`**: se foi registrado no CNPJ da CR, transferir
    a titularidade no Registro.br para o CNPJ novo.
+
+---
+
+## ADR-021 — Motor de repasse
+
+**Data:** 2026-11-13
+**Status:** aceita
+
+**Contexto.** O prompt 15 do plano era o maior buraco estrutural: a tabela
+`payouts` existia e ninguém escrevia nela. O sistema sabia cobrar e
+reembolsar, mas não sabia pagar o produtor.
+
+Ao construir o motor apareceu um defeito anterior a ele: **o checkout não
+pedia retenção à PSP.** `montarSplits` aceitava `holdUntil`, mas a chamada não
+passava. A parcela do produtor entrava como saldo disponível no dia da venda —
+antes do evento, da janela de arrependimento e da janela de chargeback. Um
+evento cancelado viraria saldo a descoberto no primeiro reembolso.
+
+**Decisão.**
+
+1. **Retenção desde a venda.** O checkout passa `holdUntil` na parcela do
+   produtor: fim do evento + `dias_liberacao_reserva` + 30 dias de folga
+   (`retencaoAte`, em `src/domain/payout.ts`). É um teto de segurança, não a
+   data do repasse: quem libera é o motor, por comando
+   (`conditionalRelease`).
+
+2. **Duas varreduras, no job `repasses`** (cron de hora em hora):
+   - `agendarRepassesPendentes`: evento com `data_fim` vencida, status
+     `publicado`, `esgotado` ou `encerrado`, e sem repasse → cria, **por
+     meio de pagamento**, a tranche `principal` (fim + `dias_liberacao_evento`
+     dias **úteis**) e a `reserva` (fim + `dias_liberacao_reserva` dias
+     corridos). Evento cancelado não entra.
+   - `executarRepassesVencidos`: tranche vencida → recalcula e manda a PSP
+     liberar. Principal antes de reserva; a reserva só sai depois que a
+     principal do mesmo evento e meio saiu.
+
+3. **O cálculo** (puro, em `src/domain/payout.ts`), por evento e meio:
+   - entram só pedidos **online com transação na PSP** — bilheteria de balcão
+     nunca passou pelo split;
+   - líquido = parcela do produtor − reembolsos (na proporção do split, como a
+     PSP debita) − chargebacks (o valor contestado inteiro, porque o produtor é
+     o responsável no split);
+   - principal = líquido − `reserva_<metodo>_bps`;
+   - **reserva = líquido na data dela − o que a principal liberou.** Não é
+     percentual: é "o que sobrou". Chargeback que chega entre as duas datas
+     sai da reserva sozinho.
+   - Resultado negativo é **saldo a descoberto** (caso de borda 5): a tranche
+     se encerra sem chamar a PSP, o valor negativo fica gravado em
+     `liberado_centavos` e entra no `audit_log` como `repasse_a_descoberto`.
+
+4. **Recalcular na execução, congelar depois da primeira tentativa.** Entre o
+   fim do evento e a liberação ainda chegam estornos, então o valor do
+   agendamento é só estimativa. Mas a PSP memoriza o resultado pela chave de
+   idempotência: se a primeira chamada liberou e a resposta se perdeu, uma
+   segunda com outro valor e a mesma chave devolve o primeiro resultado — e o
+   banco gravaria um valor que não aconteceu. Por isso, da segunda tentativa
+   em diante, o valor gravado é reaproveitado.
+
+5. **Concorrência e falhas.**
+   - O `UPDATE ... WHERE status in (...) and tentativas = N` é o cadeado: dois
+     workers nunca processam a mesma tranche (teste com 6 simultâneos).
+   - Chave de idempotência estável: `payout:<evento>:<tranche>:<metodo>`.
+   - Coluna nova `payouts.tentativas` (migration `0010`). Erro temporário da
+     PSP volta a ser tentado na próxima passagem, até 5 vezes. Erro definitivo
+     (`retryable: false`) ou produtor sem recebedor vai direto ao teto e
+     espera alguém olhar — o painel de saúde já acusa "Repasses com falha".
+   - `processing` há mais de 10 minutos é processo que morreu no meio: é
+     retomado com a mesma chave.
+   - Toda liberação grava `liberacao_repasse` no `audit_log` (plano, seção 14).
+
+6. **Máquina de estado** em `src/domain/payout.ts`: `scheduled → processing →
+   released`, `processing → failed → processing`, `scheduled|failed →
+   canceled`. `released` e `canceled` são terminais; `processing` não pode
+   ser cancelado, porque a PSP pode já ter liberado.
+
+**Premissas que dependem da PSP — conferir quando ela for escolhida.**
+
+1. **De onde sai o estorno.** O motor assume que reembolso e chargeback de uma
+   venda ainda retida são descontados **do saldo retido primeiro**. É o que
+   faz a reserva absorver o chargeback tardio, como o plano pede. O
+   `FakeProvider` foi ajustado para debitar nessa ordem (retido, a liberar,
+   disponível). Se a PSP real debitar do disponível primeiro, a conta da
+   reserva precisa mudar — senão sobra dinheiro do produtor preso na PSP.
+2. **Proporção do reembolso.** Assumido: a PSP debita cada recebedor na
+   proporção da parcela dele no split.
+3. **Liberação por recebedor.** `releaseFunds` libera um valor do saldo retido
+   do recebedor, não de um evento específico. Basta enquanto cada produtor
+   tem um recebedor só.
+
+O `FakeProvider` também passou a contestar no chargeback só o que ainda não
+tinha sido reembolsado — antes ele debitava o valor cheio da transação mesmo
+depois de reembolso parcial.
+
+**Fora deste ADR, ainda não feito:**
+
+- **Tela do produtor** (`/painel/financeiro`) mostrando as tranches, datas e
+  valores. O dado existe; falta a tela.
+- **Aviso ao produtor** por e-mail quando um repasse sai.
+- **Feriados** no cálculo de dias úteis. Hoje só sábado e domingo; o efeito é
+  agendar a principal um dia antes do que a PSP liberaria num feriado.
+- **Rateio entre sócios** (`event_splits`): a tabela existe, mas nem o
+  checkout nem o repasse a usam ainda.
+- **Reembolso sem conveniência.** Quando a política devolve só o preço do
+  ingresso, a PSP debita os dois recebedores na proporção do split — o
+  operador devolve uma fatia da conveniência que deveria manter. Achado
+  durante este trabalho, anterior a ele; depende de a PSP aceitar estorno com
+  valor por recebedor.

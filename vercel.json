@@ -20,6 +20,10 @@
     {
       "path": "/api/jobs/conciliacao",
       "schedule": "17 * * * *"
+    },
+    {
+      "path": "/api/jobs/repasses",
+      "schedule": "41 * * * *"
     }
   ]
 }

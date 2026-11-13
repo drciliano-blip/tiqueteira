@@ -139,6 +139,16 @@ tarefas mortas, alguma devolução falhou e precisa de gente.
 3. Confira se a data prevista já passou: a parcela principal sai em D+2 úteis,
    e a reserva de garantia só em D+30/45.
 
+4. Repasse em **falha com 5 tentativas** parou de propósito: a PSP deu erro
+   definitivo, ou o produtor não tem recebedor cadastrado. Leia
+   `payouts.ultimo_erro`, corrija a causa e volte a tranche para
+   `failed` com `tentativas = 0`; a próxima passagem do job tenta de novo,
+   com a mesma chave — não libera duas vezes.
+5. Tranche `released` com `liberado_centavos` **negativo** é saldo a
+   descoberto: o produtor recebeu mais do que sobrou depois dos chargebacks.
+   Está no `audit_log` como `repasse_a_descoberto`. Não se resolve pelo
+   sistema — é cobrança.
+
 **Nunca prometa data que o sistema não mostra.** O produtor confere no extrato
 da operadora, e promessa quebrada custa mais que atraso avisado.
 
@@ -180,6 +190,10 @@ curl -X POST https://SEU_DOMINIO/api/jobs/enviar-ingressos \
 
 # Devolver Pix pago depois da expiração
 curl -X POST https://SEU_DOMINIO/api/jobs/pagamento-atrasado \
+  -H "Authorization: Bearer $JOB_SECRET"
+
+# Agendar e liberar repasses vencidos
+curl -X POST https://SEU_DOMINIO/api/jobs/repasses \
   -H "Authorization: Bearer $JOB_SECRET"
 ```
 

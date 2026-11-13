@@ -341,7 +341,15 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
     });
   }
 
-  /** Tira do saldo, na ordem: disponível, retido, a liberar. Pode ficar negativo. */
+  /**
+   * Tira do saldo, na ordem: retido, a liberar, disponível. Pode ficar negativo.
+   *
+   * O retido sai primeiro porque é o recebível ainda não pago: estorno de
+   * uma venda cujo dinheiro a PSP ainda segura é descontado desse dinheiro.
+   * É a premissa do motor de repasse (ADR-021) — a reserva absorve o
+   * chargeback que chega depois da tranche principal. Confirmar contra a PSP
+   * escolhida: se ela debitar do disponível primeiro, a conta da reserva muda.
+   */
   private debitar(recipientId: string, valor: Cents): void {
     const s = this.saldo(recipientId);
     let resta = valor;
@@ -352,9 +360,9 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
       resta -= usa;
     };
 
-    consumir('available');
     consumir('blocked');
     consumir('waitingFunds');
+    consumir('available');
 
     // Saldo a descoberto — caso de borda 5 do plano. Fica negativo de
     // propósito: esconder isso seria esconder o prejuízo.
@@ -552,8 +560,10 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
     const alvo = responsaveis.length > 0 ? responsaveis : interna.splits;
     const somaAlvo = alvo.reduce((a, s) => a + s.amount, 0);
 
+    // Contesta-se o que o comprador ainda não tinha recebido de volta.
+    const contestado = interna.tx.amount - interna.reembolsado;
     for (const split of alvo) {
-      const parte = somaAlvo === 0 ? 0 : Math.round((interna.tx.amount * split.amount) / somaAlvo);
+      const parte = somaAlvo === 0 ? 0 : Math.round((contestado * split.amount) / somaAlvo);
       this.debitar(split.providerRecipientId, parte);
     }
 
