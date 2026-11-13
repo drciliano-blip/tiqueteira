@@ -12,7 +12,8 @@ e reordena o roadmap.
 
 ## O que é
 Marketplace de ingressos multi-tenant. O operador da plataforma é
-CR ADMINISTRACAO E PARTICIPACOES LTDA, CNPJ 47.301.164/0001-12.
+YOUR TICKET LTDA (nome fantasia YourTicket), CNPJ 69.700.606/0001-36 —
+empresa constituída exclusivamente para esta operação (ADR-020).
 Produtores vendem ingressos dos próprios eventos. O operador cobra conveniência
 e/ou comissão.
 

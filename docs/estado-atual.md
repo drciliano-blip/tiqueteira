@@ -1,6 +1,6 @@
 # Estado atual do projeto
 
-**Última verificação: 14/09/2026.** Documento de passagem de bastão: quem
+**Última verificação: 14/09/2026; operador atualizado em 13/11/2026 (ADR-020).** Documento de passagem de bastão: quem
 chegar agora — pessoa ou sessão nova do Claude — lê este arquivo e sabe onde
 o projeto está, sem precisar inspecionar o repositório de novo.
 
@@ -35,8 +35,8 @@ escrito que é.
 
 ## 1. Em uma frase
 
-Marketplace de ingressos multi-tenant, operado por **CR ADMINISTRACAO E
-PARTICIPACOES LTDA** (CNPJ 47.301.164/0001-12), em que a plataforma **nunca
+Plataforma de ingressos multi-tenant, operada por **YOUR TICKET LTDA**
+(CNPJ 69.700.606/0001-36, empresa própria da operação — ADR-020), em que a plataforma **nunca
 custodia dinheiro** — todo pagamento usa split na PSP.
 
 O sistema vende, emite ingresso com QR, controla portaria com entrada e saída
@@ -399,10 +399,10 @@ Nada disto é código, e tudo isto bloqueia.
 | O quê | Por que bloqueia |
 |---|---|
 | **Escolher a PSP** | Sem ela não há venda online. É a Fase 2 inteira, e é o bloqueio nº 1 |
-| **Inscrição municipal e NFS-e** | A CR Administração é holding; holding pura costuma não ter inscrição municipal, e sem ela não há como faturar a conveniência. Obter leva de dias a semanas — **é o item mais urgente de verificar com o contador** |
-| **CNAE de serviço** | Sem CNAE compatível, a PSP classifica como risco alto ou recusa o cadastro |
+| **Inscrição municipal (CCM São Paulo) e NFS-e** | Sem ela não há como faturar a conveniência. A YOUR TICKET LTDA já nasceu com CNAE de serviço; falta confirmar o CCM, o regime tributário e o código de serviço da NFS-e com o contador |
+| **Conta PJ da YOUR TICKET LTDA** | Exigida no cadastro de recebedor do operador na PSP |
+| ~~CNAE de serviço~~ | **Resolvido** com o CNPJ novo (ADR-020) |
 | **Taxas do piloto** | Conveniência, comissão e taxa fixa. São configuração no banco; falta o número |
-| **`git push`** | 12 commits parados no local; o staging está desatualizado |
 | **Rodar o ensaio geral** | Fase 1.5. Duas horas, dois celulares, a folha impressa. Encontra o que teste nenhum encontra. Roteiro em `docs/ensaio.md` |
 | **Domínio próprio** | Recomendação: subdomínio (`ingressos.dominio.com.br`), não a raiz — problema de entrega de e-mail não pode contaminar o domínio institucional |
 

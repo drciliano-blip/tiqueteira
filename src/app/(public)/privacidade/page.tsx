@@ -41,7 +41,8 @@ export default function Privacidade() {
             <h2 className="font-titulo text-lg font-bold text-txt">1. Quem trata seus dados</h2>
             <p className="mt-2">
               <strong className="text-txt">{OPERADOR.razaoSocial}</strong>, CNPJ{' '}
-              {OPERADOR.cnpjFormatado}, operadora da plataforma YourTicket.
+              {OPERADOR.cnpjFormatado}, com sede na {OPERADOR.endereco}, operadora da
+              plataforma YourTicket.
             </p>
           </section>
 

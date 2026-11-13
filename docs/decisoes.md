@@ -284,7 +284,7 @@ de produção.
 ## ADR-010 — Operador da plataforma
 
 **Data:** 2026-09-08
-**Status:** aceita
+**Status:** substituída pela ADR-020 em 2026-11-13
 
 **Contexto.** A decisão nº 1 da seção 1 do plano — qual CNPJ do grupo opera a
 plataforma — bloqueava a conta na PSP, o contrato com produtor e a nota fiscal.
@@ -876,7 +876,8 @@ banco, e um cache real esconderia mudança de dado entre um caso e o seguinte.
 **Decisão.** A plataforma chama-se **YourTicket** e o domínio canônico é
 **`yourticket.com.br`**.
 
-**O que NÃO muda.** A pessoa jurídica continua sendo **CR ADMINISTRACAO E
+**O que NÃO muda.** *(Superado pela ADR-020: a pessoa jurídica agora é a
+YOUR TICKET LTDA.)* A pessoa jurídica continua sendo **CR ADMINISTRACAO E
 PARTICIPACOES LTDA**, CNPJ 47.301.164/0001-12 (ADR-010). YourTicket é nome
 fantasia — é ele que aparece para o comprador; é a CR que assina contrato,
 abre cadastro na PSP e emite nota.
@@ -923,3 +924,73 @@ pode ter uma cor só"* — e não a marca.
    ou similar, com SPF, DKIM e DMARC. Hoje o remetente padrão é o domínio de
    teste do Resend, que só entrega para o dono da conta. Ingresso no spam é o
    pior suporte possível.
+
+---
+
+## ADR-020 — Operador próprio: YOUR TICKET LTDA
+
+**Data:** 2026-11-13
+**Status:** aceita — substitui a ADR-010
+
+**Contexto.** A ADR-010 pôs a operação na CR ADMINISTRACAO E PARTICIPACOES
+LTDA, uma holding. Isso deixou três problemas abertos: holding pura costuma
+não ter inscrição municipal (sem ela não há NFS-e da conveniência), não tinha
+CNAE de serviço (a PSP classificaria como risco alto ou recusaria) e o nome
+na nota não batia com o nome que o comprador vê.
+
+**Decisão.** O operador passa a ser uma empresa constituída só para a
+plataforma:
+
+| Campo | Valor |
+|---|---|
+| Razão social | **YOUR TICKET LTDA** |
+| Nome fantasia | YOUR TICKET |
+| CNPJ | **69.700.606/0001-36** (matriz) — dígitos verificadores conferidos |
+| Constituição / inscrição | 19/10/2026 / 20/10/2026 |
+| Situação cadastral | ATIVA |
+| Natureza jurídica | 206-2 Sociedade Empresária Limitada |
+| Porte | EPP |
+| Sede | Rua Barra Funda, 1071, Barra Funda, São Paulo/SP, CEP 01152-000 |
+| CNAE principal | 79.90-2-00 Serviços de reservas e outros serviços de turismo n.e.a. |
+| CNAEs secundários | 62.09-1-00, 63.11-9-00, 63.19-4-00, 73.19-0-02, 82.30-0-01 |
+
+Fonte: Comprovante de Inscrição e de Situação Cadastral, Receita Federal,
+emitido em 20/10/2026.
+
+Os CNAEs são exatamente os candidatos listados em `docs/pendencias.md`, e
+nenhum sugere atividade financeira ou de pagamento — coerente com a regra de
+que a plataforma nunca custodia dinheiro.
+
+É este CNPJ que abre o cadastro de recebedor "operador" na PSP, assina o
+contrato plataforma–produtor, emite NFS-e sobre comissão e conveniência
+(**nunca** sobre o valor do ingresso) e figura nos termos de LGPD.
+
+**O que isto resolve da ADR-010 e da ADR-019:**
+- CNAE de serviço compatível — resolvido.
+- Nome desconhecido na nota — resolvido: razão social e fantasia batem com a
+  marca e com o descritor de fatura `YOURTICKET`.
+- Registro do nome fantasia vinculado ao CNPJ — resolvido.
+
+**Consequências aplicadas:**
+- `src/lib/operador.ts`: razão social, CNPJ e endereço da sede.
+- Termos de uso e política de privacidade passam a exibir o endereço da sede
+  (site de venda ao consumidor precisa identificar o fornecedor com endereço
+  físico).
+- `CLAUDE.md`, `docs/pendencias.md`, `docs/estado-atual.md`.
+
+**O e-mail e o telefone do comprovante não foram publicados.** O e-mail
+cadastrado na Receita é de processos/contabilidade, não canal de atendimento;
+o site continua com `contato@yourticket.com.br`.
+
+**Ainda pendente, com o contador:**
+1. **Inscrição municipal (CCM) em São Paulo e habilitação para NFS-e.** Deixa
+   de ser o problema estrutural da holding, mas ainda precisa estar ativa
+   antes do primeiro evento real.
+2. **Regime tributário** e enquadramento (Simples: anexo III ou V?).
+3. **Código de serviço da NFS-e** (item da LC 116/2003) e alíquota de ISS no
+   município de São Paulo, confirmados com o contador e na legislação
+   municipal.
+4. **Conta bancária PJ** da YOUR TICKET LTDA, necessária ao cadastro de
+   recebedor na PSP.
+5. **Domínio `yourticket.com.br`**: se foi registrado no CNPJ da CR, transferir
+   a titularidade no Registro.br para o CNPJ novo.

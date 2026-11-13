@@ -74,8 +74,16 @@ entrega de ingresso não pode contaminar o domínio institucional do grupo.
 A ligação com a Vercel é um CNAME.
 
 ### CNPJ operador e CNAE
-**RESOLVIDO em 2026-09-08 (ADR-010):** o operador é
-**CR ADMINISTRACAO E PARTICIPACOES LTDA**, CNPJ **47.301.164/0001-12**.
+**RESOLVIDO em 2026-11-13 (ADR-020, substitui a ADR-010):** o operador é
+**YOUR TICKET LTDA**, CNPJ **69.700.606/0001-36**, sede em São Paulo/SP,
+constituída só para a plataforma. **Os CNAEs abaixo já constam no cadastro**
+(principal 79.90-2-00; secundários 62.09-1-00, 63.11-9-00, 63.19-4-00,
+73.19-0-02, 82.30-0-01). O que segue abaixo sobre a holding é histórico;
+continuam valendo a inscrição municipal, o regime tributário e o código de
+serviço da NFS-e.
+
+*(Histórico: em 2026-09-08 o operador era a CR ADMINISTRACAO E PARTICIPACOES
+LTDA, CNPJ 47.301.164/0001-12 — ADR-010.)*
 
 **Três verificações que continuam pendentes com o contador**, e a primeira é
 a mais urgente:
