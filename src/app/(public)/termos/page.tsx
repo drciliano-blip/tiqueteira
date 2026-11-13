@@ -33,7 +33,7 @@ export default function Termos() {
         </p>
 
         <h1 className="mt-8 text-2xl font-bold">Termos de uso</h1>
-        <p className="mt-2 text-sm text-faint">Última atualização: 8 de setembro de 2026.</p>
+        <p className="mt-2 text-sm text-faint">Última atualização: 13 de novembro de 2026.</p>
 
         <div className="prosa mt-8 space-y-8 text-muted">
           <section>
@@ -41,7 +41,7 @@ export default function Termos() {
             <p className="mt-2">
               A YourTicket é uma plataforma de intermediação de venda de ingressos operada por{' '}
               <strong className="text-txt">{OPERADOR.razaoSocial}</strong>, inscrita no CNPJ sob o
-              nº {OPERADOR.cnpjFormatado}.
+              nº {OPERADOR.cnpjFormatado}, com sede na {OPERADOR.endereco}.
             </p>
             <p className="mt-3">
               Atuamos como intermediários entre você e o produtor do evento. Quem organiza,
