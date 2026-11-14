@@ -202,17 +202,79 @@ const FUSO = 'America/Sao_Paulo';
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 const diaDaSemana = new Intl.DateTimeFormat('en-US', { timeZone: FUSO, weekday: 'short' });
+const dataLocal = new Intl.DateTimeFormat('en-CA', {
+  timeZone: FUSO,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 
 function fimDeSemana(d: Date): boolean {
   const dia = diaDaSemana.format(d);
   return dia === 'Sat' || dia === 'Sun';
 }
 
+/** Domingo de Páscoa (calendário gregoriano), pelo algoritmo de Meeus/Jones/Butcher. */
+export function pascoa(ano: number): { mes: number; dia: number } {
+  const a = ano % 19;
+  const b = Math.floor(ano / 100);
+  const c = ano % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mes = Math.floor((h + l - 7 * m + 114) / 31);
+  const dia = ((h + l - 7 * m + 114) % 31) + 1;
+  return { mes, dia };
+}
+
+function deslocar(ano: number, mes: number, dia: number, dias: number): string {
+  const t = new Date(Date.UTC(ano, mes - 1, dia) + dias * DIA_MS);
+  return t.toISOString().slice(0, 10);
+}
+
 /**
- * Soma dias úteis no fuso de São Paulo. Sábado e domingo não contam.
+ * Dias sem expediente bancário em todo o país, no formato `AAAA-MM-DD`.
  *
- * Feriado não entra na conta, por enquanto: o efeito é liberar um dia antes
- * do que a PSP liberaria — e quem decide de fato é ela. Ver ADR-021.
+ * O que conta para o repasse é o dia em que a operadora de pagamento e os
+ * bancos funcionam — por isso entram carnaval e Corpus Christi, que não
+ * fecham todo o comércio, mas fecham a compensação bancária. Feriados
+ * estaduais e municipais não entram. A lista e a base legal estão no
+ * ADR-021 e precisam ser conferidas contra o calendário da PSP escolhida.
+ */
+export function feriadosBancarios(ano: number): Set<string> {
+  const p = pascoa(ano);
+  const fixos = ['01-01', '04-21', '05-01', '09-07', '10-12', '11-02', '11-15', '11-20', '12-25'];
+  return new Set([
+    ...fixos.map((md) => `${ano}-${md}`),
+    deslocar(ano, p.mes, p.dia, -48), // segunda de carnaval
+    deslocar(ano, p.mes, p.dia, -47), // terça de carnaval
+    deslocar(ano, p.mes, p.dia, -2), // sexta-feira santa
+    deslocar(ano, p.mes, p.dia, 60), // Corpus Christi
+  ]);
+}
+
+const cacheFeriados = new Map<number, Set<string>>();
+
+function feriado(d: Date): boolean {
+  const iso = dataLocal.format(d); // AAAA-MM-DD no fuso de São Paulo
+  const ano = Number(iso.slice(0, 4));
+  let lista = cacheFeriados.get(ano);
+  if (!lista) {
+    lista = feriadosBancarios(ano);
+    cacheFeriados.set(ano, lista);
+  }
+  return lista.has(iso);
+}
+
+/**
+ * Soma dias úteis no fuso de São Paulo. Sábado, domingo e dia sem expediente
+ * bancário nacional não contam (`feriadosBancarios`).
  *
  * O Brasil não tem horário de verão desde 2019, então somar 24 h é somar um
  * dia de calendário local.
@@ -223,7 +285,7 @@ export function adicionarDiasUteis(inicio: Date, dias: number): Date {
   let faltam = dias;
   while (faltam > 0) {
     d = new Date(d.getTime() + DIA_MS);
-    if (!fimDeSemana(d)) faltam -= 1;
+    if (!fimDeSemana(d) && !feriado(d)) faltam -= 1;
   }
   return d;
 }

@@ -41,6 +41,7 @@ import {
   type PayoutStatus,
   type PedidoParaRepasse,
 } from '@/domain/payout';
+import { enfileirar } from '@/lib/jobs';
 import { getPaymentProvider } from '@/lib/payments/provider';
 import { PaymentProviderError, type PaymentProvider } from '@/lib/payments/types';
 
@@ -107,17 +108,24 @@ export async function pedidosDoRepasse(
     `,
   );
 
-  return rs.map((r) => {
-    const total = Number(r.total_centavos);
-    const reembolsado = r.status === 'refunded' ? total : Math.min(Number(r.reembolsado), total);
-    return {
-      totalCentavos: total,
-      valorProdutorCentavos: Number(r.valor_produtor_centavos),
-      valorOperadorCentavos: Number(r.valor_operador_centavos),
-      reembolsadoCentavos: reembolsado,
-      chargeback: r.status === 'chargeback',
-    };
-  });
+  return rs.map(linhaParaPedido);
+}
+
+/**
+ * Converte uma linha de `orders` (com `reembolsado` somado) no formato do
+ * cálculo. Compartilhado com a tela financeira, para que a estimativa que o
+ * produtor vê use exatamente a mesma conta que o motor vai fazer.
+ */
+export function linhaParaPedido(r: Record<string, unknown>): PedidoParaRepasse {
+  const total = Number(r.total_centavos);
+  const reembolsado = r.status === 'refunded' ? total : Math.min(Number(r.reembolsado), total);
+  return {
+    totalCentavos: total,
+    valorProdutorCentavos: Number(r.valor_produtor_centavos),
+    valorOperadorCentavos: Number(r.valor_operador_centavos),
+    reembolsadoCentavos: reembolsado,
+    chargeback: r.status === 'chargeback',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -510,4 +518,16 @@ async function concluir(
       ...(extra.definitivo ? { tentativas: MAX_TENTATIVAS_REPASSE } : {}),
     })
     .where(and(eq(payouts.id, payoutId), eq(payouts.status, 'processing')));
+
+  /**
+   * Aviso ao produtor, pela fila: liberou dinheiro, ou ficou a descoberto.
+   * Tranche que encerrou zerada é descartada pelo próprio job.
+   */
+  if (para === 'released') {
+    await enfileirar(db, {
+      nome: 'avisar-repasse',
+      payload: { payoutId },
+      dedupeKey: `avisar-repasse:${payoutId}`,
+    });
+  }
 }

@@ -23,7 +23,8 @@ export type NomeJob =
   | 'reembolso-automatico'
   | 'pagamento-atrasado'
   | 'conciliacao'
-  | 'repasses';
+  | 'repasses'
+  | 'avisar-repasse';
 
 export type EnfileirarInput = {
   nome: NomeJob;

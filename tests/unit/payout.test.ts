@@ -6,6 +6,8 @@ import {
   calcularReserva,
   chaveDoRepasse,
   datasDoRepasse,
+  feriadosBancarios,
+  pascoa,
   PAYOUT_STATUSES,
   retencaoAte,
   somarPedidos,
@@ -247,5 +249,40 @@ describe('chave de idempotência', () => {
     expect(a).toBe(chaveDoRepasse('ev1', 'principal', 'pix'));
     expect(a).not.toBe(chaveDoRepasse('ev1', 'reserva', 'pix'));
     expect(a).not.toBe(chaveDoRepasse('ev1', 'principal', 'credit_card'));
+  });
+});
+
+describe('feriados bancários', () => {
+  it('calcula a Páscoa de anos conhecidos', () => {
+    expect(pascoa(2024)).toEqual({ mes: 3, dia: 31 });
+    expect(pascoa(2025)).toEqual({ mes: 4, dia: 20 });
+    expect(pascoa(2026)).toEqual({ mes: 4, dia: 5 });
+    expect(pascoa(2027)).toEqual({ mes: 3, dia: 28 });
+  });
+
+  it('inclui os móveis de 2027: carnaval, sexta-feira santa e Corpus Christi', () => {
+    const f = feriadosBancarios(2027);
+    for (const d of ['2027-02-08', '2027-02-09', '2027-03-26', '2027-05-27']) {
+      expect(f.has(d)).toBe(true);
+    }
+    expect(f.size).toBe(13);
+  });
+
+  it('pula o feriado: evento na quinta antes da sexta-feira santa', () => {
+    // Quinta, 25/03/2027, 23h em SP. Sexta é feriado; 2 dias úteis = seg e ter.
+    const quinta = new Date('2027-03-26T02:00:00Z');
+    expect(adicionarDiasUteis(quinta, 2).toISOString()).toBe('2027-03-31T02:00:00.000Z');
+  });
+
+  it('pula o carnaval inteiro', () => {
+    // Sexta, 05/02/2027, 23h em SP. Seg e ter de carnaval não contam.
+    const sexta = new Date('2027-02-06T02:00:00Z');
+    expect(adicionarDiasUteis(sexta, 1).toISOString()).toBe('2027-02-11T02:00:00.000Z'); // quarta
+  });
+
+  it('20 de novembro não conta como dia útil', () => {
+    // Quinta, 19/11/2026, 23h em SP. Sexta (20) é feriado; 1 dia útil = segunda.
+    const quinta = new Date('2026-11-20T02:00:00Z');
+    expect(adicionarDiasUteis(quinta, 1).toISOString()).toBe('2026-11-24T02:00:00.000Z');
   });
 });

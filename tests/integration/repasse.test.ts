@@ -215,7 +215,7 @@ describe('agendamento', () => {
     const principal = new Date(todas[0]!.data_prevista as string).getTime();
     const reserva = new Date(todas[1]!.data_prevista as string).getTime();
     expect(principal - dataFim).toBeGreaterThanOrEqual(2 * DIA);
-    expect(principal - dataFim).toBeLessThanOrEqual(4 * DIA); // fim de semana no meio
+    expect(principal - dataFim).toBeLessThanOrEqual(7 * DIA); // fim de semana e feriados no meio
     expect(reserva - dataFim).toBe(35 * DIA);
   });
 
@@ -524,5 +524,82 @@ describe('falhas da PSP', () => {
       waitingFunds: 0,
       blocked: 2_000,
     });
+  });
+});
+
+describe('tela financeira do produtor', () => {
+  it('mostra liberado, a liberar e as tranches, com a mesma conta do motor', async () => {
+    const { financeiroDoProdutor } = await import('@/lib/financeiro-queries');
+    await venda('credit_card');
+    await venda('pix');
+    await agendarRepassesPendentes(opcoes());
+    await executarRepasse((await tranche('principal')).id as string, opcoes()); // cartão: 8.000
+
+    const r = await financeiroDoProdutor(tenantId);
+    expect(r.liberadoCentavos).toBe(8_000);
+    expect(r.aLiberarCentavos).toBe(20_000 - 8_000);
+
+    const ev = r.eventos.find((e) => e.eventId === eventId)!;
+    expect(ev.totais.liquidoCentavos).toBe(20_000);
+    // Reserva Pix sem nada retido não aparece: três linhas, não quatro.
+    expect(ev.tranches).toHaveLength(3);
+    const cartao = ev.tranches.find((t) => t.metodo === 'credit_card' && t.tranche === 'principal')!;
+    expect(cartao).toMatchObject({ status: 'released', liberadoCentavos: 8_000 });
+    const pix = ev.tranches.find((t) => t.metodo === 'pix' && t.tranche === 'principal')!;
+    expect(pix).toMatchObject({ status: 'scheduled', liberadoCentavos: null, estimadoCentavos: 10_000 });
+  });
+
+  it('evento ainda sem tranche aparece como previsto', async () => {
+    const { financeiroDoProdutor } = await import('@/lib/financeiro-queries');
+    await venda('credit_card');
+    const ev = (await financeiroDoProdutor(tenantId)).eventos.find((e) => e.eventId === eventId)!;
+    expect(ev.previsto).toBe(true);
+    expect(ev.tranches.map((t) => [t.tranche, t.status, t.estimadoCentavos])).toEqual([
+      ['principal', 'previsto', 8_000],
+      ['reserva', 'previsto', 2_000],
+    ]);
+  });
+
+  it('um produtor não enxerga o repasse do outro', async () => {
+    const { financeiroDoProdutor } = await import('@/lib/financeiro-queries');
+    await venda('credit_card');
+    const outro = tenantId;
+
+    // Novo tenant, sem vendas.
+    const [t] = await linhas(sql`
+      insert into tenants (slug, nome, email) values (${`rp-outro-${sufixo}-${instancia}`}, 'Outro', 'o@t.local')
+      returning id
+    `);
+    const r = await financeiroDoProdutor(t!.id as string);
+    expect(r.eventos.find((e) => e.eventId === eventId)).toBeUndefined();
+    expect((await financeiroDoProdutor(outro)).eventos.length).toBeGreaterThan(0);
+  });
+});
+
+describe('aviso ao produtor', () => {
+  it('repasse liberado entra na fila de aviso, uma vez só, e o aviso é montado', async () => {
+    const { avisarRepasse } = await import('@/jobs/avisar-repasse');
+    await venda();
+    await agendarRepassesPendentes(opcoes());
+    const p = await tranche('principal');
+    await executarRepasse(p.id as string, opcoes());
+    await executarRepasse(p.id as string, opcoes()); // segunda vez não faz nada
+
+    const fila = await linhas(sql`
+      select payload from jobs where nome = 'avisar-repasse' and dedupe_key = ${`avisar-repasse:${p.id as string}`}
+    `);
+    expect(fila).toHaveLength(1);
+
+    const r = await avisarRepasse({ payoutId: p.id as string }, 'http://localhost:3000');
+    expect(r).toMatch(/aviso de repasse enviado para rp@teste\.local/);
+  });
+
+  it('tranche zerada não gera aviso', async () => {
+    const { avisarRepasse } = await import('@/jobs/avisar-repasse');
+    await venda('pix');
+    await agendarRepassesPendentes(opcoes());
+    await executarRepassesVencidos({ ...opcoes(), agora: muitoDepois() });
+    const reserva = await tranche('reserva', 'pix');
+    expect(await avisarRepasse({ payoutId: reserva.id as string }, 'http://x')).toBe('nada a avisar');
   });
 });
