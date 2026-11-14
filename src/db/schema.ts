@@ -295,6 +295,13 @@ export const users = pgTable(
     /** Argon2id. Nulo para quem só usa magic link (comprador). */
     senhaHash: text('senha_hash'),
     status: userStatusEnum('status').notNull().default('ativo'),
+    /**
+     * Equipe da plataforma (YOUR TICKET LTDA): acessa /admin, enxerga todos
+     * os produtores e altera taxas. Não é papel de tenant — é da operadora.
+     * Só se liga por SQL ou por outro administrador, nunca por cadastro.
+     * ADR-025.
+     */
+    adminPlataforma: boolean('admin_plataforma').notNull().default(false),
     emailVerificadoEm: timestamp('email_verificado_em', { withTimezone: true }),
     ultimoLoginEm: timestamp('ultimo_login_em', { withTimezone: true }),
     ...timestamps,
@@ -1076,6 +1083,58 @@ export const chargebacks = pgTable(
   ],
 );
 
+/**
+ * Solicitação aberta pelo comprador na área "Meus ingressos" — ADR-023.
+ *
+ * O comprador relata o problema; quem decide é o produtor (ou o suporte).
+ * Sem esta tabela, a reclamação ia para o WhatsApp do produtor, e o registro
+ * do que foi pedido e do que foi respondido não existia — exatamente o que
+ * se precisa numa reclamação no Procon ou numa contestação no cartão.
+ */
+export const solicitacaoStatusEnum = pgEnum('solicitacao_status', [
+  'aberta',
+  'devolvida',
+  'recusada',
+]);
+
+export const solicitacaoTipoEnum = pgEnum('solicitacao_tipo', [
+  'evento_nao_realizado',
+  'servico_nao_prestado',
+  'servico_diferente_do_ofertado',
+  'reclamacao_procedente',
+]);
+
+export const solicitacoes = pgTable(
+  'solicitacoes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'restrict' }),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'restrict' }),
+    tipo: solicitacaoTipoEnum('tipo').notNull(),
+    relato: text('relato').notNull(),
+    status: solicitacaoStatusEnum('status').notNull().default('aberta'),
+    /** O que o produtor respondeu. Obrigatório na recusa. */
+    resposta: text('resposta'),
+    refundId: uuid('refund_id').references(() => refunds.id, { onDelete: 'set null' }),
+    respondidoPor: uuid('respondido_por').references(() => users.id, { onDelete: 'set null' }),
+    respondidoEm: timestamp('respondido_em', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index('solicitacoes_tenant_status_idx').on(t.tenantId, t.status, t.criadoEm),
+    index('solicitacoes_order_idx').on(t.orderId),
+    check('solicitacoes_relato_ck', sql`length(${t.relato}) >= 15`),
+    check(
+      'solicitacoes_resposta_ck',
+      sql`${t.status} <> 'recusada' or length(coalesce(${t.resposta}, '')) >= 15`,
+    ),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Infraestrutura: webhooks, jobs, auditoria
 // ---------------------------------------------------------------------------
@@ -1355,6 +1414,7 @@ export type NewTicket = typeof tickets.$inferInsert;
 export type TicketMovimento = typeof ticketMovimentos.$inferSelect;
 export type FilaVirtual = typeof filaVirtual.$inferSelect;
 export type Payout = typeof payouts.$inferSelect;
+export type Solicitacao = typeof solicitacoes.$inferSelect;
 export type Refund = typeof refunds.$inferSelect;
 export type Chargeback = typeof chargebacks.$inferSelect;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
@@ -1385,4 +1445,5 @@ export const TENANT_SCOPED_TABLES = [
   'event_splits',
   'guest_lists',
   'guest_list_entries',
+  'solicitacoes',
 ] as const;

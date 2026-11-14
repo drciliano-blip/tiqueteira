@@ -57,64 +57,10 @@ export async function executarReembolso(
 ): Promise<ResultadoReembolso> {
   const db = serviceDb();
 
-  const [dados] = await db
-    .select({
-      id: orders.id,
-      tenantId: orders.tenantId,
-      status: orders.status,
-      totalCentavos: orders.totalCentavos,
-      subtotalCentavos: orders.subtotalCentavos,
-      convenienciaCentavos: orders.convenienciaCentavos,
-      criadoEm: orders.criadoEm,
-      providerTransactionId: orders.providerTransactionId,
-      canal: orders.canal,
-      eventoInicio: events.dataInicio,
-      eventoStatus: events.status,
-      cancelamentoAteDiasCompra: events.cancelamentoAteDiasCompra,
-      cancelamentoAteHorasEvento: events.cancelamentoAteHorasEvento,
-      permiteReembolsoParcial: events.permiteReembolsoParcial,
-    })
-    .from(orders)
-    .innerJoin(events, eq(events.id, orders.eventId))
-    .where(eq(orders.id, pedido.orderId))
-    .limit(1);
-
-  if (!dados || dados.tenantId !== pedido.tenantId) {
-    return { ok: false, erro: 'Pedido não encontrado.' };
-  }
-  if (dados.status !== 'paid' && dados.status !== 'partially_refunded') {
-    return { ok: false, erro: 'Só pedido pago pode ser reembolsado.' };
-  }
-
-  const ingressos = await db
-    .select({ id: tickets.id, status: tickets.status })
-    .from(tickets)
-    .where(eq(tickets.orderId, pedido.orderId));
-
-  const validos = ingressos.filter((t) => t.status === 'valido');
-
-  const [somaAnterior] = await db
-    .select({ total: sql<number>`coalesce(sum(${refunds.valorCentavos}), 0)` })
-    .from(refunds)
-    .where(and(eq(refunds.orderId, pedido.orderId), eq(refunds.status, 'succeeded')));
-
-  const jaReembolsado = Number(somaAnterior?.total ?? 0);
-
-  const contexto = {
-    compradoEm: dados.criadoEm,
-    eventoInicio: dados.eventoInicio,
-    agora: new Date(),
-    cancelamentoAteDiasCompra: dados.cancelamentoAteDiasCompra,
-    cancelamentoAteHorasEvento: dados.cancelamentoAteHorasEvento,
-    permiteReembolsoParcial: dados.permiteReembolsoParcial,
-    eventoCancelado: dados.eventoStatus === 'cancelado',
-    subtotalCentavos: dados.subtotalCentavos,
-    convenienciaCentavos: dados.convenienciaCentavos,
-    totalCentavos: dados.totalCentavos,
-    ingressosNoPedido: ingressos.length,
-    ingressosParaReembolsar: pedido.quantidade,
-    jaReembolsadoCentavos: jaReembolsado,
-  };
+  const carregado = await carregarPedido(db, pedido.orderId, pedido.quantidade);
+  if (!carregado.ok) return { ok: false, erro: carregado.erro };
+  const { dados, validos, jaReembolsado, contexto } = carregado;
+  if (dados.tenantId !== pedido.tenantId) return { ok: false, erro: 'Pedido não encontrado.' };
 
   const decisao: Decisao = pedido.problema
     ? reembolsoPorProblema(contexto, pedido.problema)
@@ -266,4 +212,79 @@ export async function executarReembolso(
     valorCentavos: decisao.valorCentavos,
     tipo: decisao.tipo,
   };
+}
+
+/**
+ * Lê o pedido e monta o contexto da decisão. Compartilhado entre a execução
+ * e a simulação que o comprador vê antes de confirmar.
+ */
+async function carregarPedido(db: ReturnType<typeof serviceDb>, orderId: string, quantidade: number) {
+  const [dados] = await db
+    .select({
+      id: orders.id,
+      tenantId: orders.tenantId,
+      status: orders.status,
+      totalCentavos: orders.totalCentavos,
+      subtotalCentavos: orders.subtotalCentavos,
+      convenienciaCentavos: orders.convenienciaCentavos,
+      criadoEm: orders.criadoEm,
+      providerTransactionId: orders.providerTransactionId,
+      canal: orders.canal,
+      eventoInicio: events.dataInicio,
+      eventoStatus: events.status,
+      cancelamentoAteDiasCompra: events.cancelamentoAteDiasCompra,
+      cancelamentoAteHorasEvento: events.cancelamentoAteHorasEvento,
+      permiteReembolsoParcial: events.permiteReembolsoParcial,
+    })
+    .from(orders)
+    .innerJoin(events, eq(events.id, orders.eventId))
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!dados) return { ok: false as const, erro: 'Pedido não encontrado.' };
+  if (dados.status !== 'paid' && dados.status !== 'partially_refunded') {
+    return { ok: false as const, erro: 'Só pedido pago pode ser reembolsado.' };
+  }
+
+  const ingressos = await db
+    .select({ id: tickets.id, status: tickets.status })
+    .from(tickets)
+    .where(eq(tickets.orderId, orderId));
+
+  const validos = ingressos.filter((t) => t.status === 'valido');
+
+  const [somaAnterior] = await db
+    .select({ total: sql<number>`coalesce(sum(${refunds.valorCentavos}), 0)` })
+    .from(refunds)
+    .where(and(eq(refunds.orderId, orderId), eq(refunds.status, 'succeeded')));
+
+  const jaReembolsado = Number(somaAnterior?.total ?? 0);
+
+  const contexto = {
+    compradoEm: dados.criadoEm,
+    eventoInicio: dados.eventoInicio,
+    agora: new Date(),
+    cancelamentoAteDiasCompra: dados.cancelamentoAteDiasCompra,
+    cancelamentoAteHorasEvento: dados.cancelamentoAteHorasEvento,
+    permiteReembolsoParcial: dados.permiteReembolsoParcial,
+    eventoCancelado: dados.eventoStatus === 'cancelado',
+    subtotalCentavos: dados.subtotalCentavos,
+    convenienciaCentavos: dados.convenienciaCentavos,
+    totalCentavos: dados.totalCentavos,
+    ingressosNoPedido: ingressos.length,
+    ingressosParaReembolsar: quantidade,
+    jaReembolsadoCentavos: jaReembolsado,
+  };
+
+  return { ok: true as const, dados, ingressos, validos, jaReembolsado, contexto };
+}
+
+/**
+ * O que aconteceria se o comprador pedisse o cancelamento agora — sem
+ * executar nada. A tela mostra o valor e o prazo antes do botão.
+ */
+export async function simularReembolso(orderId: string, quantidade: number): Promise<Decisao> {
+  const r = await carregarPedido(serviceDb(), orderId, quantidade);
+  if (!r.ok) return { permitido: false, explicacao: r.erro };
+  return avaliarReembolso(r.contexto);
 }

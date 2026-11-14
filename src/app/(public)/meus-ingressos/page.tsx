@@ -116,6 +116,28 @@ async function ListaDeIngressos({ email }: { email: string }) {
             </section>
           )}
 
+          <section className="mt-12">
+            <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-faint">
+              Seus pedidos
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              Cancelar, reenviar o ingresso ou relatar um problema com o evento.
+            </p>
+            <ul className="mt-4 divide-y divide-line overflow-hidden rounded-cartao border border-line">
+              {[...new Map(ingressos.map((i) => [i.pedidoId, i])).values()].map((i) => (
+                <li key={i.pedidoId}>
+                  <Link
+                    href={`/meus-ingressos/pedido/${i.pedidoId}`}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm transition hover:bg-raised"
+                  >
+                    <span className="min-w-0 truncate">{i.eventoTitulo}</span>
+                    <span className="tabular shrink-0 text-faint">nº {i.pedidoNumero} →</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+
           {passados.length > 0 && (
             <section className="mt-12">
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-faint">

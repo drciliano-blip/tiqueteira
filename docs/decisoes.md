@@ -1180,3 +1180,122 @@ entendimento sobre a taxa que **também não foi verificado** em fonte oficial.
   recebedores na proporção do split; o operador devolve a parte dele. Cobrar
   do produtor a taxa devolvida por falha dele é decisão comercial, para o
   contrato plataforma–produtor.
+
+---
+
+## ADR-023 — Autoatendimento do comprador e solicitações
+
+**Data:** 2026-11-14
+**Status:** aceita
+
+**Contexto.** O plano (Caminho A, argumento nº 3) pede que o atendimento
+próximo não vire custo de suporte. As três dúvidas que geram quase todo o
+suporte de bilheteria — "posso cancelar?", "não recebi o ingresso" e "o
+evento deu problema" — não tinham resposta sem falar com alguém.
+
+**Decisão.**
+
+1. **Página do pedido para o comprador** (`/meus-ingressos/pedido/[id]`),
+   aberta pela sessão do link mágico. Toda ação confere que o pedido é do
+   e-mail da sessão.
+   - **Cancelar:** a mesma regra automática do painel (arrependimento ou
+     política do evento). A tela mostra antes se há direito e o porquê,
+     pela simulação `simularReembolso`, que não executa nada.
+   - **Reenviar ingresso:** pela fila, com limite de 3 por hora por pedido.
+   - **Relatar problema com o evento:** abre uma **solicitação**.
+2. **Tabela `solicitacoes`** (migration `0012`), com RLS por tenant: motivo
+   (os mesmos quatro da ADR-022), relato, situação (`aberta`, `devolvida`,
+   `recusada`), resposta e quem respondeu. Uma aberta por pedido.
+3. **O produtor decide**, na caixa `/painel/solicitacoes` e na página do
+   pedido, que passa a mostrar o relato em destaque:
+   - devolve pelo "Problema no evento" (ADR-022), que já vem com o motivo do
+     comprador marcado e fecha a solicitação como `devolvida`; ou
+   - responde por escrito sem devolver — resposta obrigatória, mínimo de 15
+     caracteres, também garantida por CHECK no banco.
+4. **Avisos por e-mail** pela fila (`avisar-solicitacao`, cron `avisos` a
+   cada 5 minutos): o produtor ao abrir, o comprador ao responder.
+5. Tudo no `audit_log`.
+
+**Corrigido no caminho:** pedido com devolução parcial sumia de "Meus
+ingressos" (a consulta só aceitava `paid`), e o comprador não achava o
+ingresso que restou.
+
+---
+
+## ADR-024 — Telas do produtor: configurações, recebimento, público e cadastro
+
+**Data:** 2026-11-14
+**Status:** aceita
+
+**Decisão.**
+
+1. **`/cadastro`:** usuário, conta e vínculo de dono numa transação, com
+   aceite dos termos registrado no `audit_log` e limite de 5 por hora por
+   origem. As taxas nascem dos padrões do banco e são revistas pela
+   plataforma (ADR-025). Endereço de vitrine que coincide com rota do sistema
+   (`admin`, `painel`, `checkout`…) ganha sufixo, senão a vitrine ficaria
+   inalcançável. O "Publique seu evento" leva até lá.
+2. **`/painel/configuracoes`:** dados da casa, marca e medição de campanha,
+   com validação de CNPJ e registro do que mudou (antes e depois). Condições
+   comerciais aparecem só para leitura.
+3. **`/painel/recebimento`** (só o dono): o cadastro de recebedor vai para a
+   PSP, com a conta bancária, que **não é gravada no nosso banco** — a
+   auditoria guarda só banco e final da conta. A mudança de situação chega
+   pelo webhook `recipient.status_changed`, e a situação é **lida de volta
+   pela API**, não do corpo do webhook.
+4. **`/painel/publico`:** base de compradores por e-mail, eventos
+   frequentados, gasto líquido de devoluções, taxa de retorno, e **planilha
+   CSV** para Excel em português (ponto e vírgula, BOM, vírgula decimal).
+   **CPF não sai**; cada exportação fica no `audit_log`. A tela lembra o uso
+   conforme a LGPD, sem citar dispositivo — base legal a conferir, como na
+   ADR-022.
+5. **Visão geral do painel:** lista de primeiros passos; aviso de
+   recebimento conforme a situação real; próximo repasse mostra a data, não
+   R$ 0,00.
+
+**Corrigido no caminho:** **nenhuma tela levava ao gerenciamento do evento**
+(lotes, cupons, listas, bilheteria, relatórios, cancelamento): o título do
+evento no painel abria a página pública, e o botão de criar evento dizia "em
+construção" embora a tela existisse.
+
+---
+
+## ADR-025 — Área administrativa da plataforma
+
+**Data:** 2026-11-14
+**Status:** aceita
+
+**Contexto.** O plano (seção 13) prevê `/admin`: produtores, aprovação de
+cadastro, taxas por produtor, todos os pedidos, reembolso manual, repasses,
+fila de tarefas, webhooks e auditoria. Não existia, nem o conceito de
+usuário da plataforma — todo login estava preso a um produtor.
+
+**Decisão.**
+
+1. **`users.admin_plataforma`** (migration `0013`). Não é papel de tenant: é
+   da operadora. Liga-se só por SQL ou por outro administrador — nunca pelo
+   cadastro.
+2. Para quem não é administrador, `/admin` responde **404**, sem anunciar que
+   existe.
+3. A leitura é transversal, pela conexão de serviço; **toda escrita grava no
+   `audit_log` com o usuário**: mudança de taxa (antes, depois e
+   justificativa — plano, seção 14), situação do cadastro à mão, reabrir e
+   cancelar repasse, reembolso pelo suporte.
+4. Mudança de taxa vale só para pedidos novos (cada pedido grava o
+   snapshot). A reserva não pode sair antes de 30 dias.
+5. Reabrir repasse mantém a chave de idempotência: se a PSP chegou a
+   liberar, a nova chamada devolve o mesmo resultado.
+6. O login da equipe cai em `/admin`.
+
+**Para usar em produção:** marcar o usuário da equipe no Supabase —
+`update users set admin_plataforma = true where lower(email) = '…';`
+
+---
+
+## Nota — Checkout que voltava para a página inicial (2026-11-14)
+
+O campo de busca do cabeçalho navegava para a home quando o componente
+remontava (mudança de tamanho de tela, modo estrito do React), não só quando
+a pessoa digitava. Na página do evento, o clique em "Comprar" podia terminar
+na página inicial em vez do pagamento. Reproduzido no navegador e
+corrigido: a busca só navega depois de digitação, e só se o termo mudou.

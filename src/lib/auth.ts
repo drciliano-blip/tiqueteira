@@ -161,6 +161,8 @@ export type AuthContext = {
   expiraEm: Date;
   /** Papéis do usuário, por tenant. */
   papeis: { tenantId: string; role: Role; eventoId: string | null }[];
+  /** Equipe da plataforma — ADR-025. */
+  adminPlataforma: boolean;
 };
 
 /**
@@ -185,6 +187,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
       nome: users.nome,
       email: users.email,
       status: users.status,
+      adminPlataforma: users.adminPlataforma,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -219,6 +222,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
     scopeEventId: row.scopeEventId,
     expiraEm: row.expiraEm,
     papeis,
+    adminPlataforma: row.adminPlataforma,
   };
 }
 

@@ -12,19 +12,23 @@ import { useEffect, useRef, useState, useTransition } from 'react';
  *
  * A digitação atualiza a URL depois de uma pausa. Sem a pausa, cada tecla
  * viraria uma consulta ao banco.
+ *
+ * Só navega depois de a pessoa DIGITAR, e só se o termo mudou de fato. O
+ * cabeçalho aparece também na página do evento: antes, uma remontagem do
+ * componente (troca de tamanho de tela, modo estrito do React) disparava a
+ * navegação para a home no meio da compra — o comprador clicava em
+ * "Comprar" e caía na página inicial em vez do pagamento.
  */
 export function BuscaEventos({ autoFocus = false }: { autoFocus?: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
   const [termo, setTermo] = useState(params.get('q') ?? '');
   const [, iniciar] = useTransition();
-  const primeiro = useRef(true);
+  const digitou = useRef(false);
 
   useEffect(() => {
-    if (primeiro.current) {
-      primeiro.current = false;
-      return;
-    }
+    if (!digitou.current) return;
+    if (termo.trim() === (params.get('q') ?? '').trim()) return;
 
     const id = setTimeout(() => {
       const busca = new URLSearchParams(Array.from(params.entries()));
@@ -55,7 +59,10 @@ export function BuscaEventos({ autoFocus = false }: { autoFocus?: boolean }) {
         name="q"
         type="search"
         value={termo}
-        onChange={(e) => setTermo(e.target.value)}
+        onChange={(e) => {
+          digitou.current = true;
+          setTermo(e.target.value);
+        }}
         autoFocus={autoFocus}
         placeholder="Buscar por evento, casa ou cidade"
         className="w-full rounded-botao border border-line bg-raised py-2.5 pl-9 pr-3 text-sm placeholder:text-faint focus:border-accent focus:outline-none"

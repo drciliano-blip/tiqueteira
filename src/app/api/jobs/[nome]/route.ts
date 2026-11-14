@@ -9,6 +9,7 @@ import { reembolsarPagamentosAtrasados } from '@/jobs/reembolso-atrasado';
 import { devolverPedidosExpirados } from '@/jobs/expirar-reservas';
 import { agendarRepassesPendentes, executarRepassesVencidos } from '@/lib/payouts';
 import { avisarRepasse, type PayloadAvisoRepasse } from '@/jobs/avisar-repasse';
+import { avisarSolicitacao, type PayloadAvisoSolicitacao } from '@/jobs/avisar-solicitacao';
 import { env } from '@/lib/env';
 
 /**
@@ -29,6 +30,7 @@ const NOMES: NomeJob[] = [
   'conciliacao',
   'repasses',
   'avisar-repasse',
+  'avisos',
 ];
 
 /** Comparação em tempo constante: `===` vaza o prefixo acertado pelo tempo. */
@@ -96,6 +98,12 @@ export async function POST(
     return NextResponse.json({ agendados, executados, avisos });
   }
 
+  // Avisos por e-mail que não são ingresso: solicitações do comprador.
+  if (nome === 'avisos') {
+    const relatorio = await processarFila('avisar-solicitacao');
+    return NextResponse.json({ processados: relatorio.length, relatorio });
+  }
+
   const relatorio = await processarFila(nome as NomeJob);
   return NextResponse.json({ processados: relatorio.length, relatorio });
 }
@@ -118,6 +126,11 @@ async function processarFila(
         );
       } else if (job.nome === 'reembolso-automatico') {
         detalhe = await reembolsarPedidosDoEvento(job.payload as PayloadCancelamento);
+      } else if (job.nome === 'avisar-solicitacao') {
+        detalhe = await avisarSolicitacao(
+          job.payload as PayloadAvisoSolicitacao,
+          env().NEXT_PUBLIC_APP_URL,
+        );
       } else if (job.nome === 'avisar-repasse') {
         detalhe = await avisarRepasse(
           job.payload as PayloadAvisoRepasse,

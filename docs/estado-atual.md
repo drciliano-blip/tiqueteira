@@ -1,6 +1,6 @@
 # Estado atual do projeto
 
-**Última verificação: 14/11/2026** — operador (ADR-020), motor de repasse e tela financeira (ADR-021), devolução por falha na prestação do serviço (ADR-022). Documento de passagem de bastão: quem
+**Última verificação: 14/11/2026** — operador (ADR-020), repasse e financeiro (ADR-021), devolução por falha no serviço (ADR-022), autoatendimento do comprador (ADR-023), telas do produtor e cadastro (ADR-024), área administrativa (ADR-025). Documento de passagem de bastão: quem
 chegar agora — pessoa ou sessão nova do Claude — lê este arquivo e sabe onde
 o projeto está, sem precisar inspecionar o repositório de novo.
 
@@ -116,9 +116,8 @@ banco, rede nem SDK. Toda transição de estado passa por lá.
 
 ## 4. Banco de dados
 
-**25 tabelas, 12 migrations** (`0000` a `0011`). A `0010` (coluna
-`payouts.tentativas`) e a `0011` (motivos novos de reembolso) precisam estar
-aplicadas no Supabase antes de publicar este código.
+**26 tabelas, 14 migrations** (`0000` a `0013`). Novas nesta rodada:
+`solicitacoes` (`0012`, com RLS por tenant) e `users.admin_plataforma` (`0013`).
 
 ### Comparação com a seção 7 do plano
 
@@ -241,17 +240,21 @@ controles de cenário** da seção 9.1, sem faltar nenhum: `simulatePayment`,
 
 ## 8. Testes
 
-**478 testes em 30 arquivos, todos passando** (14/11/2026, contra um Postgres
+**496 testes em 33 arquivos, todos passando** (14/11/2026, contra um Postgres
 16 local com as migrations e a RLS aplicadas). Build de produção, lint e tipos
 limpos.
 
 - **16 arquivos unitários** — domínio puro: dinheiro, taxas, máquina de
   estado, portaria, fila, cupom, transferência, CPF, política de reembolso,
   repasse.
-- **14 arquivos de integração**, contra o banco real: RLS, estoque, webhook,
+- **17 arquivos de integração**, contra o banco real: RLS, estoque, webhook,
   portaria, listas, fila, cupons, bilheteria, relatórios, equipe, rate limit,
   domínio, repasse (com a tela financeira e o aviso), devolução por problema
-  no evento.
+  no evento, solicitações do comprador, público e recebedor, administração.
+
+As telas novas e o checkout foram **abertos num navegador de verdade**
+(Playwright), no computador e no celular: compra completa, autoatendimento,
+cadastro, painel e administração.
 
 ### Os testes que sustentam o sistema
 
@@ -380,6 +383,12 @@ Evento não realizado, comprador sem o serviço, evento diferente do anunciado
 e reclamação procedente: devolução integral ou abatimento, sem prazo, com
 relato por escrito. Ver ADR-022 — **a base legal ainda precisa ser conferida
 em fonte oficial.**
+
+### ~~Telas que faltavam~~ — ENTREGUES em 14/11/2026
+
+Exportação CSV e público recorrente, cadastro do produtor, recebimento,
+configurações, autoatendimento do comprador e área administrativa. Ver
+ADR-023, ADR-024 e ADR-025. As seções 3º a 5º abaixo ficam como histórico.
 
 ### 3º — Exportação CSV e público recorrente
 

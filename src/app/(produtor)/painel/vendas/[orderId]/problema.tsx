@@ -42,14 +42,17 @@ export function ReembolsoPorProblema({
   orderId,
   ingressos,
   totalCentavos,
+  problemaInicial,
 }: {
   tenantId: string;
   orderId: string;
   /** Ingressos que ainda contam: válidos e já usados. */
   ingressos: number;
   totalCentavos: number;
+  /** Quando há solicitação do comprador, já vem marcado o motivo dele. */
+  problemaInicial?: string;
 }) {
-  const [aberto, setAberto] = useState(false);
+  const [aberto, setAberto] = useState(Boolean(problemaInicial));
   const [modalidade, setModalidade] = useState<'integral' | 'abatimento'>('integral');
   const [quantidade, setQuantidade] = useState(ingressos);
   const acao = reembolsarPorProblema.bind(null, tenantId, orderId);
@@ -90,7 +93,14 @@ export function ReembolsoPorProblema({
         <div className="mt-2 space-y-2">
           {PROBLEMAS.map((p) => (
             <label key={p.valor} className="flex items-start gap-3 text-sm">
-              <input type="radio" name="problema" value={p.valor} required className="mt-1 h-4 w-4" />
+              <input
+                type="radio"
+                name="problema"
+                value={p.valor}
+                required
+                defaultChecked={p.valor === problemaInicial}
+                className="mt-1 h-4 w-4"
+              />
               <span>
                 {p.rotulo}
                 <span className="block text-xs text-faint">{p.ajuda}</span>

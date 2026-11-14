@@ -32,6 +32,10 @@ export const REGRAS = {
   criarPedido: { limite: 12, janelaSegundos: 300 },
   linkAcesso: { limite: 5, janelaSegundos: 900 },
   cupom: { limite: 20, janelaSegundos: 300 },
+  // Reenvio de ingresso pelo comprador: sem limite, vira disparador de e-mail.
+  reenvio: { limite: 3, janelaSegundos: 3600 },
+  // Cadastro de produtor: cada um cria usuário e conta.
+  cadastro: { limite: 5, janelaSegundos: 3600 },
 } as const satisfies Record<string, Regra>;
 
 export type Acao = keyof typeof REGRAS;
