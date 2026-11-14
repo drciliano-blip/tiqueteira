@@ -21,7 +21,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { serviceDb, type Database } from '@/db/client';
-import { events, orderItems, orders, tickets, webhookEvents } from '@/db/schema';
+import { auditLog, events, orderItems, orders, tenants, tickets, webhookEvents } from '@/db/schema';
 import { aplicarEvento, type OrderStatus } from '@/domain/order';
 import { confirmarEstoque, devolverEstoque } from '@/lib/inventory';
 import { enfileirar } from '@/lib/jobs';
@@ -117,7 +117,7 @@ export async function processarWebhook(
   const registroId = inserido[0]!.id;
 
   try {
-    const detalhe = await processarEvento(db, evento, deps.ticketSecret);
+    const detalhe = await processarEvento(db, evento, deps.ticketSecret, deps.provider);
 
     await db
       .update(webhookEvents)
@@ -177,7 +177,7 @@ export async function processarEventoConfiavel(
   const registroId = inserido[0]!.id;
 
   try {
-    const detalhe = await processarEvento(db, evento, deps.ticketSecret);
+    const detalhe = await processarEvento(db, evento, deps.ticketSecret, deps.provider);
     await db
       .update(webhookEvents)
       .set({ processadoEm: new Date() })
@@ -194,7 +194,12 @@ async function processarEvento(
   db: Database,
   evento: NormalizedWebhookEvent,
   ticketSecret: string,
+  provider: PaymentProvider,
 ): Promise<string> {
+  if (evento.type === 'recipient.status_changed') {
+    return atualizarRecebedor(db, evento, provider);
+  }
+
   if (!evento.providerTransactionId) return 'evento sem transação — ignorado';
 
   const [pedido] = await db
@@ -355,4 +360,49 @@ async function emitirIngressos(
 
   await tx.insert(tickets).values(novos);
   return novos.length;
+}
+
+const KYC_POR_STATUS = {
+  pending: 'em_analise',
+  active: 'aprovado',
+  rejected: 'reprovado',
+  suspended: 'suspenso',
+} as const;
+
+/**
+ * Mudança na situação do cadastro do produtor na PSP — ADR-024.
+ *
+ * O webhook só avisa que mudou. A situação é lida de volta pela API, com a
+ * credencial da plataforma: o corpo do webhook não é fonte de verdade para
+ * liberar alguém a receber dinheiro.
+ */
+async function atualizarRecebedor(
+  db: Database,
+  evento: NormalizedWebhookEvent,
+  provider: PaymentProvider,
+): Promise<string> {
+  if (!evento.providerRecipientId) return 'evento de recebedor sem identificador — ignorado';
+
+  const recebedor = await provider.getRecipient(evento.providerRecipientId);
+  const kyc = KYC_POR_STATUS[recebedor.status];
+
+  const atualizados = await db
+    .update(tenants)
+    .set({ kycStatus: kyc, atualizadoEm: new Date() })
+    .where(eq(tenants.providerRecipientId, evento.providerRecipientId))
+    .returning({ id: tenants.id });
+
+  for (const t of atualizados) {
+    await db.insert(auditLog).values({
+      tenantId: t.id,
+      acao: 'kyc_atualizado',
+      entidade: 'tenants',
+      entidadeId: t.id,
+      depois: { kycStatus: kyc, origem: 'psp', mensagem: recebedor.statusMessage ?? null },
+    });
+  }
+
+  return atualizados.length > 0
+    ? `recebedor ${evento.providerRecipientId} → ${kyc}`
+    : `nenhum produtor com o recebedor ${evento.providerRecipientId}`;
 }

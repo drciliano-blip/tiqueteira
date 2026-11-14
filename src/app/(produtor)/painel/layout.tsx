@@ -52,10 +52,13 @@ export default async function LayoutPainel({ children }: { children: ReactNode }
             { href: '/painel/vendas', rotulo: 'Vendas' },
             { href: '/painel/financeiro', rotulo: 'Financeiro' },
             { href: '/painel/solicitacoes', rotulo: 'Solicitações' },
+            { href: '/painel/publico', rotulo: 'Público' },
             { href: '/painel/eventos/novo', rotulo: 'Novo evento' },
             { href: '/painel/espacos', rotulo: 'Espaços' },
             { href: '/painel/equipe', rotulo: 'Equipe' },
+            { href: '/painel/recebimento', rotulo: 'Recebimento' },
             { href: '/painel/dominio', rotulo: 'Domínio' },
+            { href: '/painel/configuracoes', rotulo: 'Configurações' },
             { href: '/painel/saude', rotulo: 'Saúde' },
           ].map((item) => (
             <Link

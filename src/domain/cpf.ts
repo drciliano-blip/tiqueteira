@@ -56,3 +56,28 @@ export function mascararCpf(entrada: string): string {
   if (cpf.length !== 11) return '***';
   return `***.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-**`;
 }
+
+/** Só dígitos, 14 posições. */
+export function normalizarCnpj(entrada: string): string {
+  return entrada.replace(/\D/g, '');
+}
+
+/** CNPJ numérico com dígitos verificadores conferidos. */
+export function cnpjValido(entrada: string): boolean {
+  const d = normalizarCnpj(entrada);
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+  const nums = [...d].map(Number);
+  const dv = (base: number[], pesos: number[]) => {
+    const soma = base.reduce((a, n, i) => a + n * pesos[i]!, 0) % 11;
+    return soma < 2 ? 0 : 11 - soma;
+  };
+  const p1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  const p2 = [6, ...p1];
+  return dv(nums.slice(0, 12), p1) === nums[12] && dv(nums.slice(0, 13), p2) === nums[13];
+}
+
+export function formatarCnpj(entrada: string): string {
+  const d = normalizarCnpj(entrada);
+  if (d.length !== 14) return entrada;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+}
