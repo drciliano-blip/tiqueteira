@@ -33,6 +33,11 @@ const Cadastro = z.object({
   termos: z.literal('on', 'É preciso aceitar os termos de uso.'),
 });
 
+const ROTAS_DO_SISTEMA = new Set([
+  'admin', 'api', 'cadastro', 'checkout', 'como-funciona', 'e', 'entrar', 'ingresso',
+  'meus-ingressos', 'painel', 'portaria', 'privacidade', 'publique', 'termos',
+]);
+
 function slugify(texto: string): string {
   return texto
     .normalize('NFD')
@@ -73,8 +78,10 @@ export async function cadastrarProdutor(
 
   const senhaHash = await hashPassword(v.senha);
 
-  // Slug livre: o nome, ou o nome com um número.
-  const base = slugify(v.casa) || 'produtor';
+  // Slug livre: o nome, ou o nome com um número. Nome que coincide com uma
+  // rota do sistema deixaria a vitrine inalcançável — ganha um sufixo.
+  let base = slugify(v.casa) || 'produtor';
+  if (ROTAS_DO_SISTEMA.has(base)) base = `${base}-eventos`;
   const ocupados = (await db.execute(sql`
     select slug from tenants where slug = ${base} or slug like ${`${base}-%`}
   `)) as unknown as { slug: string }[];

@@ -63,6 +63,7 @@ export async function entrarComSenha(
       id: users.id,
       senhaHash: users.senhaHash,
       status: users.status,
+      adminPlataforma: users.adminPlataforma,
     })
     .from(users)
     .where(sql`lower(${users.email}) = lower(${dados.data.email})`)
@@ -107,7 +108,8 @@ export async function entrarComSenha(
   await setSessionCookie(sessao.token, sessao.expiraEm);
   await db.update(users).set({ ultimoLoginEm: new Date() }).where(eq(users.id, usuario.id));
 
-  redirect('/painel');
+  // Equipe da plataforma cai na administração (ADR-025); produtor, no painel.
+  redirect(usuario.adminPlataforma ? '/admin' : '/painel');
 }
 
 export async function sair(): Promise<void> {

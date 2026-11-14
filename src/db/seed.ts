@@ -126,7 +126,12 @@ async function seed() {
   const [admin, produtorA, produtorB, portaria] = await db
     .insert(schema.users)
     .values([
-      { email: 'admin@yourticket.local', nome: 'Operador da Plataforma', senhaHash: senha },
+      {
+        email: 'admin@yourticket.local',
+        nome: 'Operador da Plataforma',
+        senhaHash: senha,
+        adminPlataforma: true,
+      },
       { email: 'ana@complexojussara.com.br', nome: 'Ana Ribeiro', senhaHash: senha },
       { email: 'bruno@fabrique.com.br', nome: 'Bruno Tavares', senhaHash: senha },
       { email: 'portaria@complexojussara.com.br', nome: 'Equipe de Portaria', senhaHash: senha },

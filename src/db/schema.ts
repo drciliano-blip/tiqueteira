@@ -295,6 +295,13 @@ export const users = pgTable(
     /** Argon2id. Nulo para quem só usa magic link (comprador). */
     senhaHash: text('senha_hash'),
     status: userStatusEnum('status').notNull().default('ativo'),
+    /**
+     * Equipe da plataforma (YOUR TICKET LTDA): acessa /admin, enxerga todos
+     * os produtores e altera taxas. Não é papel de tenant — é da operadora.
+     * Só se liga por SQL ou por outro administrador, nunca por cadastro.
+     * ADR-025.
+     */
+    adminPlataforma: boolean('admin_plataforma').notNull().default(false),
     emailVerificadoEm: timestamp('email_verificado_em', { withTimezone: true }),
     ultimoLoginEm: timestamp('ultimo_login_em', { withTimezone: true }),
     ...timestamps,

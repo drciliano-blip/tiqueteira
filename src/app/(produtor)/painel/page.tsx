@@ -40,6 +40,11 @@ export default async function Painel() {
         <p className="prosa mx-auto mt-2 text-sm text-muted">
           Peça a quem administra a plataforma para vincular seu usuário a um produtor.
         </p>
+        {auth.adminPlataforma && (
+          <Link href="/admin" className="mt-4 inline-block text-sm text-accent">
+            Ir para a administração da plataforma
+          </Link>
+        )}
         <form action={sair} className="mt-6">
           <button className="text-sm text-accent">Sair</button>
         </form>
