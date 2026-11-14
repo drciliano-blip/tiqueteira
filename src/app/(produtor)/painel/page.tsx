@@ -71,9 +71,35 @@ export default async function Painel() {
 
         {tenant.kyc !== 'aprovado' && (
           <p className="mt-4 rounded-botao border border-alerta/40 bg-alerta/10 px-4 py-3 text-sm text-alerta">
-            Cadastro em análise. Você já pode montar eventos, mas o repasse só é liberado depois
-            da aprovação.
+            {tenant.kyc === 'pendente'
+              ? 'Falta cadastrar a conta onde o dinheiro cai. Você já pode montar eventos, mas só vende online depois disso. '
+              : tenant.kyc === 'em_analise'
+                ? 'Cadastro em análise na operadora. Você já pode montar eventos; o repasse é liberado depois da aprovação. '
+                : 'A operadora não aprovou o cadastro de recebimento. '}
+            <Link href="/painel/recebimento" className="font-semibold underline">
+              Recebimento
+            </Link>
           </p>
+        )}
+
+        {(tenant.kyc === 'pendente' || eventos.length === 0) && (
+          <section className="mt-6 rounded-cartao border border-line bg-raised p-4">
+            <h2 className="font-titulo font-bold">Primeiros passos</h2>
+            <ol className="mt-3 space-y-2 text-sm">
+              <Passo feito={tenant.kyc !== 'pendente'} href="/painel/recebimento">
+                Cadastrar a conta de recebimento
+              </Passo>
+              <Passo feito={eventos.length > 0} href="/painel/espacos">
+                Cadastrar o espaço do evento
+              </Passo>
+              <Passo feito={eventos.length > 0} href="/painel/eventos/novo">
+                Criar e publicar o primeiro evento
+              </Passo>
+              <Passo feito={false} href="/painel/configuracoes">
+                Conferir a marca: cor, logo e contato
+              </Passo>
+            </ol>
+          </section>
         )}
 
         <dl className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -94,15 +120,12 @@ export default async function Painel() {
           />
           <Indicador
             rotulo="Próximo repasse"
-            valor={
-              resumo.proximoRepasse
-                ? formatarBRL(resumo.proximoRepasse.liberadoCentavos)
-                : '—'
-            }
+            // O valor da tranche só existe depois de calculado na data; antes
+            // disso, mostrar "R$ 0,00" seria mentir. A estimativa está no
+            // Financeiro.
+            valor={resumo.proximoRepasse ? dataCurta(resumo.proximoRepasse.dataPrevista) : '—'}
             detalhe={
-              resumo.proximoRepasse
-                ? `previsto para ${dataCurta(resumo.proximoRepasse.dataPrevista)}`
-                : 'nenhum repasse agendado'
+              resumo.proximoRepasse ? 'valores no Financeiro' : 'nenhum repasse agendado'
             }
           />
         </dl>
@@ -110,16 +133,19 @@ export default async function Painel() {
         <section className="mt-12">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="font-titulo text-lg font-bold">Eventos</h2>
-            <span className="rounded-botao border border-dashed border-line-forte px-3 py-1.5 text-xs text-faint">
-              Criar evento — em construção
-            </span>
+            <Link
+              href="/painel/eventos/novo"
+              className="rounded-botao bg-accent px-3 py-1.5 text-xs font-semibold text-accent-txt"
+            >
+              Criar evento
+            </Link>
           </div>
 
           {eventos.length === 0 ? (
             <div className="mt-4 rounded-cartao border border-line bg-raised px-5 py-12 text-center">
               <p className="font-titulo font-semibold">Nenhum evento por aqui ainda</p>
               <p className="mt-2 text-sm text-muted">
-                Quando o cadastro de eventos estiver pronto, o primeiro nasce aqui.
+                Cadastre o espaço e crie o primeiro evento — leva poucos minutos.
               </p>
             </div>
           ) : (
@@ -142,12 +168,17 @@ export default async function Painel() {
                       <tr key={e.id} className="transition hover:bg-raised">
                         <td className="px-4 py-3">
                           <Link
-                            href={`/${tenant.slug}/e/${e.slug}`}
+                            href={`/painel/eventos/${e.id}`}
                             className="font-medium transition hover:text-accent"
                           >
                             {e.titulo}
                           </Link>
-                          <p className="text-xs text-faint">{e.venueNome}</p>
+                          <p className="text-xs text-faint">
+                            {e.venueNome} ·{' '}
+                            <Link href={`/${tenant.slug}/e/${e.slug}`} className="hover:text-txt">
+                              ver página
+                            </Link>
+                          </p>
                         </td>
                         <td className="tabular px-4 py-3 text-muted">
                           {dataCurta(e.dataInicio)}
@@ -206,5 +237,27 @@ function Indicador({
       <dd className="tabular mt-1.5 font-titulo text-xl font-bold">{valor}</dd>
       <dd className="mt-1 text-xs text-faint">{detalhe}</dd>
     </div>
+  );
+}
+
+function Passo({ feito, href, children }: { feito: boolean; href: string; children: React.ReactNode }) {
+  return (
+    <li className="flex items-center gap-3">
+      <span
+        aria-hidden
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-xs ${
+          feito ? 'border-sucesso bg-sucesso/20 text-sucesso' : 'border-line-forte text-faint'
+        }`}
+      >
+        {feito ? '✓' : ''}
+      </span>
+      {feito ? (
+        <span className="text-muted line-through">{children}</span>
+      ) : (
+        <Link href={href} className="text-accent">
+          {children}
+        </Link>
+      )}
+    </li>
   );
 }

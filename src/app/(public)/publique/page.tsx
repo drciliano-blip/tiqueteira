@@ -65,7 +65,7 @@ export default function Publique() {
 
         <div className="mt-8 flex flex-wrap gap-3">
           <Link
-            href="/entrar?cadastro=1"
+            href="/cadastro"
             className="rounded-botao bg-accent px-6 py-3 font-semibold text-accent-txt"
           >
             Quero vender
