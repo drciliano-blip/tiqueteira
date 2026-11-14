@@ -415,6 +415,27 @@ geram quase todo o suporte.
 
 ---
 
+## 11-A. Antes de iniciar os testes — checklist
+
+Combinado em 14/11/2026: estes itens ficam para **antes do ensaio geral**,
+não bloqueiam o desenvolvimento.
+
+1. **Revisão jurídica das telas** (ADR-022, ADR-024): conferir em fonte
+   oficial a base legal da devolução por falha na prestação do serviço, da
+   devolução da taxa de conveniência, do arrependimento e do uso da base de
+   compradores (LGPD). Hoje as telas falam em "Código de Defesa do
+   Consumidor" e "LGPD" sem citar artigo, e o comentário de
+   `refund-policy.ts` atribui ao Procon-SP um entendimento não verificado.
+2. **Lista de feriados bancários** (ADR-021) conferida contra a legislação e
+   o calendário da PSP.
+3. **Conta de administrador:** criar a conta de `drciliano@gmail.com` (pelo
+   `/cadastro`) e marcar `users.admin_plataforma = true` no Supabase.
+4. **E-mail transacional** em domínio próprio (`MAIL_FROM` e `RESEND_API_KEY`
+   na Vercel), senão o ingresso só chega ao dono da conta do Resend.
+5. **`PAYMENT_OPERATOR_RECIPIENT_ID` na Vercel** começando com `fake_rcpt_`
+   enquanto a PSP for a simulada — o provider falso só reconhece recebedor
+   com esse prefixo, e outro valor faz o checkout recusar toda compra.
+
 ## 12. O que depende de decisão humana
 
 Nada disto é código, e tudo isto bloqueia.
