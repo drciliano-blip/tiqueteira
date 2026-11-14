@@ -790,7 +790,50 @@ export async function reembolsarPorProblema(
 
   if (!r.ok) return { erro: r.erro };
 
+  // Se o comprador tinha pedido, a solicitação se fecha com a devolução — e
+  // ele é avisado por e-mail com o relato do produtor como resposta.
+  const { marcarSolicitacaoDevolvida } = await import('@/lib/solicitacoes');
+  await marcarSolicitacaoDevolvida({
+    tenantId,
+    orderId,
+    refundId: r.refundId,
+    userId: auth?.userId ?? null,
+    resposta: dados.data.justificativa,
+  });
+
   revalidatePath(`/painel/vendas/${orderId}`);
   revalidatePath('/painel/financeiro');
+  revalidatePath('/painel/solicitacoes');
+  return { ok: true };
+}
+
+/** Responde a solicitação do comprador sem devolver. A resposta é obrigatória. */
+export async function recusarSolicitacaoDoComprador(
+  tenantId: string,
+  orderId: string,
+  solicitacaoId: string,
+  _anterior: EstadoFormulario,
+  formData: FormData,
+): Promise<EstadoFormulario> {
+  if (!z.uuid().safeParse(solicitacaoId).success) return { erro: 'Solicitação inválida.' };
+
+  const auth = await getAuth();
+  try {
+    requireRole(auth, tenantId, 'admin');
+  } catch {
+    return { erro: 'Responder solicitação exige dono ou administrador.' };
+  }
+
+  const { recusarSolicitacao } = await import('@/lib/solicitacoes');
+  const r = await recusarSolicitacao({
+    tenantId,
+    solicitacaoId,
+    resposta: String(formData.get('resposta') ?? ''),
+    userId: auth?.userId ?? null,
+  });
+  if (!r.ok) return { erro: r.erro };
+
+  revalidatePath(`/painel/vendas/${orderId}`);
+  revalidatePath('/painel/solicitacoes');
   return { ok: true };
 }

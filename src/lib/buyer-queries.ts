@@ -7,7 +7,7 @@
  */
 import 'server-only';
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 
 import { serviceDb } from '@/db/client';
 import { events, orders, tenants, tickets, ticketTypes, venues } from '@/db/schema';
@@ -31,6 +31,7 @@ export type IngressoDoComprador = {
   tenantSlug: string;
   tenantNome: string;
   pedidoNumero: number;
+  pedidoId: string;
 };
 
 export async function ingressosPorEmail(email: string): Promise<IngressoDoComprador[]> {
@@ -54,6 +55,7 @@ export async function ingressosPorEmail(email: string): Promise<IngressoDoCompra
       tenantSlug: tenants.slug,
       tenantNome: tenants.nome,
       pedidoNumero: orders.numero,
+      pedidoId: orders.id,
     })
     .from(tickets)
     .innerJoin(orders, eq(orders.id, tickets.orderId))
@@ -67,7 +69,9 @@ export async function ingressosPorEmail(email: string): Promise<IngressoDoCompra
         // continua vendo todos os ingressos que pagou, mesmo os já
         // transferidos para o nome de outra pessoa.
         sql`lower(${orders.compradorEmail}) = lower(${email})`,
-        eq(orders.status, 'paid'),
+        // Pedido com devolução parcial ainda tem ingresso válido: some da
+        // lista e o comprador não acha o que restou.
+        inArray(orders.status, ['paid', 'partially_refunded']),
       ),
     )
     .orderBy(desc(events.dataInicio), tickets.codigo);

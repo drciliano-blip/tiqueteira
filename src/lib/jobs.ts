@@ -24,7 +24,9 @@ export type NomeJob =
   | 'pagamento-atrasado'
   | 'conciliacao'
   | 'repasses'
-  | 'avisar-repasse';
+  | 'avisar-repasse'
+  | 'avisar-solicitacao'
+  | 'avisos';
 
 export type EnfileirarInput = {
   nome: NomeJob;

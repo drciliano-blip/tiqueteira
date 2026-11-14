@@ -7,7 +7,9 @@ import { dataLonga, hora } from '@/lib/datas';
 import { formatarBRL } from '@/lib/money';
 import { tenantAtual } from '@/lib/painel-contexto';
 import { detalharVenda } from '@/lib/vendas-queries';
+import { ROTULO_SOLICITACAO, solicitacaoAbertaDoPedido } from '@/lib/solicitacoes';
 import { ReembolsoPorProblema } from './problema';
+import { ResponderSemDevolucao } from './solicitacao';
 import { FormularioReembolso } from './reembolsar';
 import { BotaoReenviar } from './reenviar';
 
@@ -33,6 +35,9 @@ export default async function DetalheDoPedido({ params }: Props) {
   const pedido = await detalharVenda(ctx.tenant.id, orderId);
   if (!pedido) notFound();
 
+  const podeDecidir = ctx.papel === 'owner' || ctx.papel === 'admin';
+  const solicitacao = await solicitacaoAbertaDoPedido(ctx.tenant.id, orderId);
+
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8">
       <Link href="/painel/vendas" className="text-sm text-muted transition hover:text-txt">
@@ -53,6 +58,31 @@ export default async function DetalheDoPedido({ params }: Props) {
           />
         )}
       </div>
+
+      {solicitacao && (
+        <section className="mt-6 rounded-cartao border border-alerta/50 bg-alerta/10 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-alerta">
+            O comprador pediu ajuda
+          </p>
+          <p className="mt-1 font-medium">{ROTULO_SOLICITACAO[solicitacao.tipo]}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm text-muted">{solicitacao.relato}</p>
+          {podeDecidir ? (
+            <div className="mt-4 space-y-2 text-sm">
+              <p className="text-muted">
+                Para devolver, use <strong>Problema no evento</strong>, abaixo — o comprador recebe
+                o seu relato como resposta. Ou:
+              </p>
+              <ResponderSemDevolucao
+                tenantId={ctx.tenant.id}
+                orderId={pedido.id}
+                solicitacaoId={solicitacao.id}
+              />
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-faint">Só dono ou administrador pode responder.</p>
+          )}
+        </section>
+      )}
 
       <section className="mt-8 grid gap-6 sm:grid-cols-2">
         <div className="rounded-cartao border border-line bg-raised p-4">
@@ -195,6 +225,7 @@ export default async function DetalheDoPedido({ params }: Props) {
                     .length
                 }
                 totalCentavos={pedido.totalCentavos}
+                {...(solicitacao ? { problemaInicial: solicitacao.tipo } : {})}
               />
             </div>
           </section>
