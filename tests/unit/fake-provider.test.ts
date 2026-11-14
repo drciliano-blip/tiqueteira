@@ -407,3 +407,19 @@ describe('controles de cenário', () => {
     expect((await psp.getRecipient(r.providerRecipientId)).status).toBe('active');
   });
 });
+
+describe('recebedor do operador vindo do ambiente', () => {
+  it('a fábrica registra o PAYMENT_OPERATOR_RECIPIENT_ID, qualquer que seja o formato', async () => {
+    const { criarProvider } = await import('@/lib/payments/provider');
+    const antes = process.env.PAYMENT_OPERATOR_RECIPIENT_ID;
+    process.env.PAYMENT_OPERATOR_RECIPIENT_ID = 'operador-yourticket';
+    try {
+      const p = criarProvider('fake', { producao: false });
+      const r = await p.getRecipient('operador-yourticket');
+      expect(r.status).toBe('active');
+    } finally {
+      if (antes === undefined) delete process.env.PAYMENT_OPERATOR_RECIPIENT_ID;
+      else process.env.PAYMENT_OPERATOR_RECIPIENT_ID = antes;
+    }
+  });
+});

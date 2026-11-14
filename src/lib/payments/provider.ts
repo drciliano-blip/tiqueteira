@@ -72,6 +72,10 @@ export function criarProvider(
       );
     }
     const p = new FakeProvider(opcoes.webhookSecret ?? 'fake-webhook-secret');
+    // O recebedor do operador é configuração de ambiente: o provider falso
+    // tem de conhecê-lo, seja qual for o formato do valor.
+    const operador = process.env.PAYMENT_OPERATOR_RECIPIENT_ID?.trim();
+    if (operador) p.registrarRecebedor(operador);
     conferirCapacidades(p);
     return p;
   }
