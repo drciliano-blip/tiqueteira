@@ -46,10 +46,11 @@ export default async function LayoutPainel({ children }: { children: ReactNode }
           </div>
         </div>
 
-        <nav className="mx-auto flex max-w-6xl gap-1 px-3 pb-2">
+        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-3 pb-2">
           {[
             { href: '/painel', rotulo: 'Visão geral' },
             { href: '/painel/vendas', rotulo: 'Vendas' },
+            { href: '/painel/financeiro', rotulo: 'Financeiro' },
             { href: '/painel/eventos/novo', rotulo: 'Novo evento' },
             { href: '/painel/espacos', rotulo: 'Espaços' },
             { href: '/painel/equipe', rotulo: 'Equipe' },
@@ -59,7 +60,7 @@ export default async function LayoutPainel({ children }: { children: ReactNode }
             <Link
               key={item.href}
               href={item.href}
-              className="rounded-botao px-3 py-2 text-sm text-muted transition hover:bg-raised hover:text-txt"
+              className="shrink-0 whitespace-nowrap rounded-botao px-3 py-2 text-sm text-muted transition hover:bg-raised hover:text-txt"
             >
               {item.rotulo}
             </Link>

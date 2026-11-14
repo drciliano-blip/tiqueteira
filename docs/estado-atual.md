@@ -1,6 +1,6 @@
 # Estado atual do projeto
 
-**Última verificação: 14/09/2026; operador atualizado em 13/11/2026 (ADR-020).** Documento de passagem de bastão: quem
+**Última verificação: 14/11/2026** — operador (ADR-020), motor de repasse e tela financeira (ADR-021), devolução por falha na prestação do serviço (ADR-022). Documento de passagem de bastão: quem
 chegar agora — pessoa ou sessão nova do Claude — lê este arquivo e sabe onde
 o projeto está, sem precisar inspecionar o repositório de novo.
 
@@ -40,9 +40,9 @@ Plataforma de ingressos multi-tenant, operada por **YOUR TICKET LTDA**
 custodia dinheiro** — todo pagamento usa split na PSP.
 
 O sistema vende, emite ingresso com QR, controla portaria com entrada e saída
-(inclusive sem rede), transfere titularidade, reembolsa e concilia. **O que
-ele ainda não faz: vender online de verdade**, porque não existe adaptador de
-PSP — e **pagar o produtor**, porque o motor de repasse não foi escrito.
+(inclusive sem rede), transfere titularidade, reembolsa, concilia e **agenda
+e libera o repasse ao produtor** (ADR-021). **O que ele ainda não faz: vender
+online de verdade**, porque não existe adaptador de PSP.
 
 ---
 
@@ -90,12 +90,13 @@ src/
     api/          webhooks/payments, jobs/[nome], orders/[id]/status,
                   portaria/manifest, portaria/sync, fila/[eventId], sessao
   db/             schema.ts, rls.sql, client.ts, apply-rls.ts,
-                  migrations/ (0000–0009), seed.ts, ensaio.ts, bench.ts
+                  migrations/ (0000–0010), seed.ts, ensaio.ts, bench.ts
   domain/         PURO, sem banco nem rede: order, inventory, portaria, fila,
                   cupom, transferencia, refund-policy, lista-convidados,
                   cpf, categorias
   lib/            33 arquivos + payments/
-  jobs/           expirar-reservas, enviar-ingressos, conciliacao,
+  jobs/           (o repasse roda pelo job `repasses`, em lib/payouts.ts)
+                  expirar-reservas, enviar-ingressos, conciliacao,
                   cancelar-evento, reembolso-atrasado
   components/     cabecalho, acoes-da-conta, scanner-qr, seletor-ingressos,
                   tema-tenant, cartaz, busca-eventos, menu-mobile, …
@@ -115,7 +116,9 @@ banco, rede nem SDK. Toda transição de estado passa por lá.
 
 ## 4. Banco de dados
 
-**25 tabelas, 10 migrations aplicadas** (`0000` a `0009`).
+**25 tabelas, 12 migrations** (`0000` a `0011`). A `0010` (coluna
+`payouts.tentativas`) e a `0011` (motivos novos de reembolso) precisam estar
+aplicadas no Supabase antes de publicar este código.
 
 ### Comparação com a seção 7 do plano
 
@@ -238,13 +241,17 @@ controles de cenário** da seção 9.1, sem faltar nenhum: `simulatePayment`,
 
 ## 8. Testes
 
-**369 testes em 25 arquivos, todos passando.** Build de produção, lint e tipos
+**478 testes em 30 arquivos, todos passando** (14/11/2026, contra um Postgres
+16 local com as migrations e a RLS aplicadas). Build de produção, lint e tipos
 limpos.
 
-- **14 arquivos unitários** — domínio puro: dinheiro, taxas, máquina de
-  estado, portaria, fila, cupom, transferência, CPF, política de reembolso.
-- **11 arquivos de integração**, contra o banco real: RLS, estoque, webhook,
-  portaria, listas, fila, cupons, bilheteria, relatórios, equipe, rate limit.
+- **16 arquivos unitários** — domínio puro: dinheiro, taxas, máquina de
+  estado, portaria, fila, cupom, transferência, CPF, política de reembolso,
+  repasse.
+- **14 arquivos de integração**, contra o banco real: RLS, estoque, webhook,
+  portaria, listas, fila, cupons, bilheteria, relatórios, equipe, rate limit,
+  domínio, repasse (com a tela financeira e o aviso), devolução por problema
+  no evento.
 
 ### Os testes que sustentam o sistema
 
@@ -324,7 +331,7 @@ domínio e pulou para a frente.
 | 1 | 13 PWA de check-in | completo |
 | 1.5 | ensaio geral | **ferramenta pronta, ensaio NÃO EXECUTADO** |
 | 2 | 14 adaptador da PSP | **bloqueado — decisão comercial** |
-| 2 | **15 motor de repasse** | **NÃO EXISTE** |
+| 2 | 15 motor de repasse | **entregue** (ADR-021) — falta a tela do produtor e o aviso por e-mail |
 | 2 | 16 reembolso | completo |
 | 2 | 17 conciliação | completo |
 | 3 | 18 check-in offline | feito, **menos a sincronização entre aparelhos por rede local** |
@@ -338,16 +345,16 @@ domínio e pulou para a frente.
 **A seção 19 do plano está desatualizada:** a fila virtual aparece na Fase 4 e
 já está entregue (ADR-014).
 
-### O maior buraco estrutural
+### O buraco estrutural que fechou
 
-**Prompt 15 — o motor de repasse.** E ele **não depende da PSP real**: a
-seção 9.1 do plano diz que o `FakeProvider` declara `conditionalRelease` e
-mantém saldos por recebedor *"para que o motor de repasse seja exercitado de
-ponta a ponta"*. A tabela `payouts` existe com 19 colunas e **ninguém escreve
-nela**.
+**Prompt 15 — o motor de repasse — entregue em 13/11/2026 (ADR-021).** Agenda
+principal e reserva por meio de pagamento, recalcula com reembolsos e
+chargebacks na data, manda a PSP liberar com chave idempotente e registra
+saldo a descoberto. No caminho, corrigiu um defeito: o checkout não pedia
+retenção à PSP, e o produtor poderia sacar no dia da venda.
 
-Hoje o sistema sabe cobrar e sabe reembolsar, mas **não sabe pagar o
-produtor**.
+**Três premissas dependem da PSP** e precisam ser conferidas quando ela for
+escolhida — a principal é de onde ela desconta o estorno. Ver ADR-021.
 
 ---
 
@@ -361,11 +368,18 @@ Proxy por hostname, resolução de tenant por domínio verificado, verificação
 CNAME e tela do produtor. Ver ADR-018. **Pendência:** a emissão de certificado
 ainda é manual (adicionar o domínio ao projeto na Vercel).
 
-### 2º — Prompt 15: motor de repasse
+### ~~2º — Prompt 15: motor de repasse~~ — ENTREGUE em 13/11/2026
 
-O maior buraco estrutural. Construível e testável inteiro contra o
-`FakeProvider` hoje. Um sistema que não paga o produtor não opera um evento
-real, mesmo com a PSP escolhida.
+Ver ADR-021. Tela `/painel/financeiro`, aviso por e-mail e feriados bancários
+entregues em 14/11/2026. **Pendente:** rateio entre sócios (`event_splits`),
+que depende de cada sócio ter cadastro de recebedor na PSP.
+
+### Devolução por falha na prestação do serviço — ENTREGUE em 14/11/2026
+
+Evento não realizado, comprador sem o serviço, evento diferente do anunciado
+e reclamação procedente: devolução integral ou abatimento, sem prazo, com
+relato por escrito. Ver ADR-022 — **a base legal ainda precisa ser conferida
+em fonte oficial.**
 
 ### 3º — Exportação CSV e público recorrente
 

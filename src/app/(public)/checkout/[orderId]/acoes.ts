@@ -5,9 +5,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { serviceDb, withTenant } from '@/db/client';
-import { orderItems, orders, tenants } from '@/db/schema';
+import { events, orderItems, orders, tenants } from '@/db/schema';
 import { cpfValido, normalizarCpf } from '@/domain/cpf';
 import { mensagemDeLimitePorCpf } from '@/domain/inventory';
+import { retencaoAte } from '@/domain/payout';
 import { montarSplits, type FeeBreakdown } from '@/lib/fees';
 import { reservarLimitePorCpf } from '@/lib/inventory';
 import { OPERADOR } from '@/lib/operador';
@@ -76,9 +77,13 @@ export async function pagarComPix(
       idempotencyKey: orders.idempotencyKey,
       vencido: sql<boolean>`${orders.expiresEm} is not null and ${orders.expiresEm} <= now()`,
       recebedorProdutor: tenants.providerRecipientId,
+      diasLiberacaoEvento: tenants.diasLiberacaoEvento,
+      diasLiberacaoReserva: tenants.diasLiberacaoReserva,
+      eventoFim: events.dataFim,
     })
     .from(orders)
     .innerJoin(tenants, eq(tenants.id, orders.tenantId))
+    .innerJoin(events, eq(events.id, orders.eventId))
     .where(eq(orders.id, orderId))
     .limit(1);
 
@@ -119,10 +124,26 @@ export async function pagarComPix(
 
   let splits: SplitRule[];
   try {
-    splits = montarSplits(composicao, {
-      operadorRecipientId: recebedorOperador,
-      produtorRecipientId: pedido.recebedorProdutor,
-    });
+    splits = montarSplits(
+      composicao,
+      {
+        operadorRecipientId: recebedorOperador,
+        produtorRecipientId: pedido.recebedorProdutor,
+      },
+      {
+        /**
+         * A parcela do produtor fica RETIDA na PSP desde a venda, e só sai
+         * por comando do motor de repasse (ADR-021). Sem isto, o produtor
+         * poderia sacar no mesmo dia — antes do evento, da janela de
+         * arrependimento e da janela de chargeback — e o reembolso de um
+         * evento cancelado viraria saldo a descoberto.
+         */
+        holdUntil: retencaoAte(pedido.eventoFim, {
+          diasLiberacaoEvento: pedido.diasLiberacaoEvento,
+          diasLiberacaoReserva: pedido.diasLiberacaoReserva,
+        }),
+      },
+    );
   } catch {
     return { erro: 'Não foi possível montar a cobrança. Tente de novo em instantes.' };
   }

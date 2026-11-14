@@ -994,3 +994,189 @@ o site continua com `contato@yourticket.com.br`.
    recebedor na PSP.
 5. **Domínio `yourticket.com.br`**: se foi registrado no CNPJ da CR, transferir
    a titularidade no Registro.br para o CNPJ novo.
+
+---
+
+## ADR-021 — Motor de repasse
+
+**Data:** 2026-11-13
+**Status:** aceita
+
+**Contexto.** O prompt 15 do plano era o maior buraco estrutural: a tabela
+`payouts` existia e ninguém escrevia nela. O sistema sabia cobrar e
+reembolsar, mas não sabia pagar o produtor.
+
+Ao construir o motor apareceu um defeito anterior a ele: **o checkout não
+pedia retenção à PSP.** `montarSplits` aceitava `holdUntil`, mas a chamada não
+passava. A parcela do produtor entrava como saldo disponível no dia da venda —
+antes do evento, da janela de arrependimento e da janela de chargeback. Um
+evento cancelado viraria saldo a descoberto no primeiro reembolso.
+
+**Decisão.**
+
+1. **Retenção desde a venda.** O checkout passa `holdUntil` na parcela do
+   produtor: fim do evento + `dias_liberacao_reserva` + 30 dias de folga
+   (`retencaoAte`, em `src/domain/payout.ts`). É um teto de segurança, não a
+   data do repasse: quem libera é o motor, por comando
+   (`conditionalRelease`).
+
+2. **Duas varreduras, no job `repasses`** (cron de hora em hora):
+   - `agendarRepassesPendentes`: evento com `data_fim` vencida, status
+     `publicado`, `esgotado` ou `encerrado`, e sem repasse → cria, **por
+     meio de pagamento**, a tranche `principal` (fim + `dias_liberacao_evento`
+     dias **úteis**) e a `reserva` (fim + `dias_liberacao_reserva` dias
+     corridos). Evento cancelado não entra.
+   - `executarRepassesVencidos`: tranche vencida → recalcula e manda a PSP
+     liberar. Principal antes de reserva; a reserva só sai depois que a
+     principal do mesmo evento e meio saiu.
+
+3. **O cálculo** (puro, em `src/domain/payout.ts`), por evento e meio:
+   - entram só pedidos **online com transação na PSP** — bilheteria de balcão
+     nunca passou pelo split;
+   - líquido = parcela do produtor − reembolsos (na proporção do split, como a
+     PSP debita) − chargebacks (o valor contestado inteiro, porque o produtor é
+     o responsável no split);
+   - principal = líquido − `reserva_<metodo>_bps`;
+   - **reserva = líquido na data dela − o que a principal liberou.** Não é
+     percentual: é "o que sobrou". Chargeback que chega entre as duas datas
+     sai da reserva sozinho.
+   - Resultado negativo é **saldo a descoberto** (caso de borda 5): a tranche
+     se encerra sem chamar a PSP, o valor negativo fica gravado em
+     `liberado_centavos` e entra no `audit_log` como `repasse_a_descoberto`.
+
+4. **Recalcular na execução, congelar depois da primeira tentativa.** Entre o
+   fim do evento e a liberação ainda chegam estornos, então o valor do
+   agendamento é só estimativa. Mas a PSP memoriza o resultado pela chave de
+   idempotência: se a primeira chamada liberou e a resposta se perdeu, uma
+   segunda com outro valor e a mesma chave devolve o primeiro resultado — e o
+   banco gravaria um valor que não aconteceu. Por isso, da segunda tentativa
+   em diante, o valor gravado é reaproveitado.
+
+5. **Concorrência e falhas.**
+   - O `UPDATE ... WHERE status in (...) and tentativas = N` é o cadeado: dois
+     workers nunca processam a mesma tranche (teste com 6 simultâneos).
+   - Chave de idempotência estável: `payout:<evento>:<tranche>:<metodo>`.
+   - Coluna nova `payouts.tentativas` (migration `0010`). Erro temporário da
+     PSP volta a ser tentado na próxima passagem, até 5 vezes. Erro definitivo
+     (`retryable: false`) ou produtor sem recebedor vai direto ao teto e
+     espera alguém olhar — o painel de saúde já acusa "Repasses com falha".
+   - `processing` há mais de 10 minutos é processo que morreu no meio: é
+     retomado com a mesma chave.
+   - Toda liberação grava `liberacao_repasse` no `audit_log` (plano, seção 14).
+
+6. **Máquina de estado** em `src/domain/payout.ts`: `scheduled → processing →
+   released`, `processing → failed → processing`, `scheduled|failed →
+   canceled`. `released` e `canceled` são terminais; `processing` não pode
+   ser cancelado, porque a PSP pode já ter liberado.
+
+**Premissas que dependem da PSP — conferir quando ela for escolhida.**
+
+1. **De onde sai o estorno.** O motor assume que reembolso e chargeback de uma
+   venda ainda retida são descontados **do saldo retido primeiro**. É o que
+   faz a reserva absorver o chargeback tardio, como o plano pede. O
+   `FakeProvider` foi ajustado para debitar nessa ordem (retido, a liberar,
+   disponível). Se a PSP real debitar do disponível primeiro, a conta da
+   reserva precisa mudar — senão sobra dinheiro do produtor preso na PSP.
+2. **Proporção do reembolso.** Assumido: a PSP debita cada recebedor na
+   proporção da parcela dele no split.
+3. **Liberação por recebedor.** `releaseFunds` libera um valor do saldo retido
+   do recebedor, não de um evento específico. Basta enquanto cada produtor
+   tem um recebedor só.
+
+O `FakeProvider` também passou a contestar no chargeback só o que ainda não
+tinha sido reembolsado — antes ele debitava o valor cheio da transação mesmo
+depois de reembolso parcial.
+
+**Complementos entregues em 14/11/2026:**
+
+- **Tela do produtor** `/painel/financeiro` (só dono e administrador): já
+  liberado, a liberar, saldo a descoberto e, por evento, cada tranche com data,
+  valor e situação. Antes da execução o valor aparece como estimativa, calculado
+  pela mesma função do motor (`somarPedidos`). Leitura por `withTenant`, sob RLS.
+- **Aviso ao produtor** por e-mail quando uma tranche libera dinheiro ou fica a
+  descoberto. Entra na fila (`avisar-repasse`) na mesma hora em que o repasse
+  se encerra e sai na mesma passagem do job `repasses`.
+- **Dias sem expediente bancário** no cálculo dos dias úteis
+  (`feriadosBancarios`): 1/1, 21/4, 1/5, 7/9, 12/10, 2/11, 15/11, 20/11, 25/12,
+  segunda e terça de carnaval, sexta-feira santa e Corpus Christi (os móveis
+  calculados a partir da Páscoa). Feriados estaduais e municipais não entram.
+  **Base legal NÃO VERIFICADA EM FONTE OFICIAL NESTA CONSULTA** — o acesso ao
+  Planalto foi recusado pelo ambiente. Conferir a lista contra o calendário da
+  PSP escolhida e contra a legislação (em especial a inclusão de 20/11).
+
+**Fora deste ADR, ainda não feito:**
+
+- **Rateio entre sócios** (`event_splits`): a tabela existe, mas nem o
+  checkout nem o repasse a usam ainda.
+- **Reembolso sem conveniência.** Quando a política devolve só o preço do
+  ingresso, a PSP debita os dois recebedores na proporção do split — o
+  operador devolve uma fatia da conveniência que deveria manter. Achado
+  durante este trabalho, anterior a ele; depende de a PSP aceitar estorno com
+  valor por recebedor.
+
+---
+
+## ADR-022 — Devolução por falha na prestação do serviço
+
+**Data:** 2026-11-14
+**Status:** aceita
+
+**Contexto.** O reembolso existente cobria três situações: arrependimento
+dentro do prazo, evento cancelado pelo sistema e exceção manual "fora do
+prazo". Faltava a mais delicada: **o serviço vendido não foi entregue como
+prometido** — o evento não aconteceu e ninguém cancelou pelo sistema, o
+comprador foi barrado, a atração anunciada não veio, ou houve reclamação que o
+produtor reconheceu. Tratar isso como "exceção fora do prazo" escondia o
+motivo e não deixava devolver só parte do valor.
+
+**Decisão.**
+
+1. **Quatro motivos tipificados**, gravados em `refunds.tipo` (migration
+   `0011`, valores novos no enum `refund_type`):
+   `evento_nao_realizado`, `servico_nao_prestado`,
+   `servico_diferente_do_ofertado`, `reclamacao_procedente`.
+2. **Duas modalidades:**
+   - **Devolução integral** dos ingressos escolhidos, **taxa de conveniência
+     incluída**. Os ingressos que ainda valem são cancelados; o que já foi
+     usado na porta continua registrado como usado.
+   - **Abatimento**: devolve um valor informado, até o que foi pago pelos
+     ingressos escolhidos, e **o ingresso continua valendo** — para o evento
+     que aconteceu pior do que o anunciado.
+3. **Sem prazo e sem depender da política do evento.** Vale depois do evento
+   e mesmo em evento que não permite reembolso parcial.
+4. **Só dono ou administrador**, com **relato por escrito** (mínimo de 15
+   caracteres), que vai para `refunds.observacao` e para o `audit_log`, junto
+   com o motivo e a modalidade. É esse registro que responde a uma reclamação
+   no Procon ou a uma contestação no cartão.
+5. Na PSP, o estorno usa os motivos que o contrato `PaymentProvider` já tem
+   (`event_canceled` para evento não realizado, `other` para os demais) — o
+   contrato não mudou.
+6. O estorno entra no repasse como qualquer outro reembolso: antes da
+   liberação, reduz a tranche; depois dela, sai da reserva ou vira saldo a
+   descoberto (ADR-021).
+
+**Onde fica.** Regra pura em `reembolsoPorProblema`
+(`src/domain/refund-policy.ts`); execução em `executarReembolso`
+(`src/lib/refunds.ts`); tela na página do pedido, bloco "Problema no evento".
+
+**Base legal — NÃO VERIFICADA EM FONTE OFICIAL NESTA CONSULTA.** A tela fala
+apenas em "Código de Defesa do Consumidor", sem citar artigo, porque o texto
+da Lei 8.078/1990 não pôde ser aberto no Planalto durante este trabalho (o
+endereço redirecionou para a página inicial do gov.br, e o acesso direto foi
+recusado pelo ambiente). Antes de citar dispositivos na tela, nos termos de
+uso ou em resposta a cliente, conferir no texto compilado oficial, ao menos:
+responsabilidade do fornecedor de serviço por defeito e por vício (inclusive
+as opções do consumidor entre reexecução, restituição e abatimento),
+solidariedade da cadeia de fornecedores, descumprimento da oferta, prazos de
+reclamação por vício e cláusulas abusivas. Conferir também se a devolução
+integral da taxa de conveniência nesses casos é a posição correta frente à
+jurisprudência — o comentário de `refund-policy.ts` atribui ao Procon-SP um
+entendimento sobre a taxa que **também não foi verificado** em fonte oficial.
+
+**Não feito ainda:**
+- **Pedido de devolução pelo próprio comprador** (autoatendimento): hoje o
+  comprador reclama por fora e o produtor registra aqui.
+- **Quem arca com a taxa de conveniência devolvida.** A PSP debita os dois
+  recebedores na proporção do split; o operador devolve a parte dele. Cobrar
+  do produtor a taxa devolvida por falha dele é decisão comercial, para o
+  contrato plataforma–produtor.

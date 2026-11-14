@@ -7,6 +7,7 @@ import { dataLonga, hora } from '@/lib/datas';
 import { formatarBRL } from '@/lib/money';
 import { tenantAtual } from '@/lib/painel-contexto';
 import { detalharVenda } from '@/lib/vendas-queries';
+import { ReembolsoPorProblema } from './problema';
 import { FormularioReembolso } from './reembolsar';
 import { BotaoReenviar } from './reenviar';
 
@@ -174,6 +175,30 @@ export default async function DetalheDoPedido({ params }: Props) {
           </div>
         </section>
       )}
+
+      {(pedido.status === 'paid' || pedido.status === 'partially_refunded') &&
+        (ctx.papel === 'owner' || ctx.papel === 'admin') && (
+          <section className="mt-10">
+            <h2 className="font-titulo text-lg font-bold">Problema no evento</h2>
+            <p className="prosa mt-2 text-sm text-muted">
+              Quando o serviço vendido não foi entregue como prometido — evento que não aconteceu,
+              comprador barrado, atração anunciada que não veio —, o Código de Defesa do
+              Consumidor protege o comprador independentemente de prazo ou da política do
+              evento. Devolva aqui, com o relato do que houve.
+            </p>
+            <div className="mt-4">
+              <ReembolsoPorProblema
+                tenantId={ctx.tenant.id}
+                orderId={pedido.id}
+                ingressos={
+                  pedido.ingressos.filter((i) => i.status === 'valido' || i.status === 'usado')
+                    .length
+                }
+                totalCentavos={pedido.totalCentavos}
+              />
+            </div>
+          </section>
+        )}
 
       <section className="mt-8">
         <h2 className="font-titulo text-lg font-bold">Itens</h2>

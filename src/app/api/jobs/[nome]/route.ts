@@ -7,6 +7,8 @@ import { enviarIngressos, type PayloadEnvio } from '@/jobs/enviar-ingressos';
 import { conciliarPedidos } from '@/jobs/conciliacao';
 import { reembolsarPagamentosAtrasados } from '@/jobs/reembolso-atrasado';
 import { devolverPedidosExpirados } from '@/jobs/expirar-reservas';
+import { agendarRepassesPendentes, executarRepassesVencidos } from '@/lib/payouts';
+import { avisarRepasse, type PayloadAvisoRepasse } from '@/jobs/avisar-repasse';
 import { env } from '@/lib/env';
 
 /**
@@ -25,6 +27,8 @@ const NOMES: NomeJob[] = [
   'reembolso-automatico',
   'pagamento-atrasado',
   'conciliacao',
+  'repasses',
+  'avisar-repasse',
 ];
 
 /** Comparação em tempo constante: `===` vaza o prefixo acertado pelo tempo. */
@@ -76,7 +80,30 @@ export async function POST(
     return NextResponse.json(relatorio);
   }
 
-  const pendentes = await reservarJobs(nome as NomeJob);
+  /**
+   * Motor de repasse (ADR-021). Varredura, não fila: a tabela `payouts` já é
+   * a fila — cada linha tem data prevista, status e tentativas.
+   */
+  if (nome === 'repasses') {
+    const agendados = await agendarRepassesPendentes();
+    const executados = await executarRepassesVencidos();
+    const falhas = executados.filter((r) => r.status === 'failed');
+    if (falhas.length > 0) console.error('[repasses] falhas', falhas);
+
+    // Os avisos ao produtor saem na mesma passagem: sem cron próprio, um
+    // repasse liberado de madrugada avisa no máximo uma hora depois.
+    const avisos = await processarFila('avisar-repasse');
+    return NextResponse.json({ agendados, executados, avisos });
+  }
+
+  const relatorio = await processarFila(nome as NomeJob);
+  return NextResponse.json({ processados: relatorio.length, relatorio });
+}
+
+async function processarFila(
+  nome: NomeJob,
+): Promise<{ id: string; ok: boolean; detalhe: string }[]> {
+  const pendentes = await reservarJobs(nome);
   const relatorio: { id: string; ok: boolean; detalhe: string }[] = [];
 
   for (const job of pendentes) {
@@ -91,6 +118,11 @@ export async function POST(
         );
       } else if (job.nome === 'reembolso-automatico') {
         detalhe = await reembolsarPedidosDoEvento(job.payload as PayloadCancelamento);
+      } else if (job.nome === 'avisar-repasse') {
+        detalhe = await avisarRepasse(
+          job.payload as PayloadAvisoRepasse,
+          env().NEXT_PUBLIC_APP_URL,
+        );
       }
 
       await concluirJob(job.id);
@@ -102,7 +134,7 @@ export async function POST(
     }
   }
 
-  return NextResponse.json({ processados: relatorio.length, relatorio });
+  return relatorio;
 }
 
 /**

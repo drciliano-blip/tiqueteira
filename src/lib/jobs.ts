@@ -22,7 +22,9 @@ export type NomeJob =
   | 'expirar-reservas'
   | 'reembolso-automatico'
   | 'pagamento-atrasado'
-  | 'conciliacao';
+  | 'conciliacao'
+  | 'repasses'
+  | 'avisar-repasse';
 
 export type EnfileirarInput = {
   nome: NomeJob;

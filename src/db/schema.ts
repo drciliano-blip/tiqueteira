@@ -169,6 +169,11 @@ export const refundTypeEnum = pgEnum('refund_type', [
   'evento_cancelado',
   'chargeback',
   'outro',
+  // Falha na prestação do serviço — ADR-022.
+  'evento_nao_realizado',
+  'servico_nao_prestado',
+  'servico_diferente_do_ofertado',
+  'reclamacao_procedente',
 ]);
 
 /**
@@ -979,6 +984,12 @@ export const payouts = pgTable(
     dataEfetiva: timestamp('data_efetiva', { withTimezone: true }),
     providerPayoutId: text('provider_payout_id'),
     idempotencyKey: text('idempotency_key').notNull(),
+    /**
+     * Chamadas à PSP já feitas para esta tranche. Erro definitivo da PSP
+     * (não `retryable`) leva direto ao teto: insistir não muda a resposta,
+     * e alguém precisa olhar. ADR-021.
+     */
+    tentativas: integer('tentativas').notNull().default(0),
     ultimoErro: text('ultimo_erro'),
     ...timestamps,
   },
