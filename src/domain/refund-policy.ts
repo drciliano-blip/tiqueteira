@@ -29,7 +29,35 @@ export type TipoReembolso =
   | 'politica_evento'
   | 'evento_cancelado'
   | 'chargeback'
-  | 'outro';
+  | 'outro'
+  | ProblemaNoEvento;
+
+/**
+ * Falha na prestação do serviço — o evento é o serviço, e o ingresso é a
+ * prova da contratação. ADR-022.
+ *
+ * - `evento_nao_realizado`: não aconteceu, e o produtor não cancelou pelo
+ *   sistema (sumiu, foi interditado, a casa fechou).
+ * - `servico_nao_prestado`: aconteceu, mas este comprador não recebeu o que
+ *   comprou (barrado indevidamente, setor fechado, lotação estourada).
+ * - `servico_diferente_do_ofertado`: aconteceu diferente do anunciado
+ *   (atração principal ausente, local ou data trocados, horário muito
+ *   reduzido).
+ * - `reclamacao_procedente`: reclamação do comprador que o produtor ou o
+ *   suporte reconheceu, e que não cabe nas anteriores.
+ */
+export const PROBLEMAS_NO_EVENTO = [
+  'evento_nao_realizado',
+  'servico_nao_prestado',
+  'servico_diferente_do_ofertado',
+  'reclamacao_procedente',
+] as const;
+
+export type ProblemaNoEvento = (typeof PROBLEMAS_NO_EVENTO)[number];
+
+export function ehProblemaNoEvento(tipo: string): tipo is ProblemaNoEvento {
+  return (PROBLEMAS_NO_EVENTO as readonly string[]).includes(tipo);
+}
 
 export type ContextoReembolso = {
   compradoEm: Date;
@@ -200,5 +228,103 @@ export function reembolsoManual(
     valorCentavos: Math.min(bruto, restante),
     incluiConveniencia: true,
     explicacao: 'Reembolso autorizado manualmente.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Problema na prestação do serviço — ADR-022
+// ---------------------------------------------------------------------------
+
+export type PedidoPorProblema = {
+  problema: ProblemaNoEvento;
+  /**
+   * `integral`: devolve o preço dos ingressos escolhidos, taxa incluída, e
+   * cancela os que ainda valem.
+   * `abatimento`: devolve só parte do preço e mantém o ingresso — para quando
+   * o serviço foi prestado, mas pior do que o anunciado.
+   */
+  modalidade: 'integral' | 'abatimento';
+  /** Obrigatório no abatimento. */
+  abatimentoCentavos?: Cents;
+  /** Por que está sendo devolvido. Vai para a auditoria e para o comprador. */
+  justificativa: string;
+};
+
+export const JUSTIFICATIVA_MINIMA = 15;
+
+/**
+ * Reembolso por falha na prestação do serviço.
+ *
+ * Não tem prazo: a falha pode ser descoberta na porta ou no dia seguinte, e
+ * o direito do comprador não depende da janela de arrependimento. Também
+ * não depende de o evento permitir reembolso parcial — quem falhou não pode
+ * escolher devolver tudo ou nada.
+ *
+ * A taxa de conveniência volta junto na devolução integral: o comprador
+ * pagou por um serviço que não recebeu, e a taxa foi paga por causa dele.
+ *
+ * Exige justificativa, porque é decisão humana fora da regra automática, e
+ * o registro precisa dizer o que aconteceu.
+ */
+export function reembolsoPorProblema(
+  ctx: Pick<
+    ContextoReembolso,
+    'totalCentavos' | 'jaReembolsadoCentavos' | 'ingressosNoPedido' | 'ingressosParaReembolsar'
+  >,
+  pedido: PedidoPorProblema,
+): Decisao {
+  if (!ehProblemaNoEvento(pedido.problema)) {
+    return { permitido: false, explicacao: 'Motivo inválido.' };
+  }
+  if (pedido.justificativa.trim().length < JUSTIFICATIVA_MINIMA) {
+    return {
+      permitido: false,
+      explicacao: `Descreva o que aconteceu (pelo menos ${JUSTIFICATIVA_MINIMA} caracteres).`,
+    };
+  }
+
+  const restante = ctx.totalCentavos - ctx.jaReembolsadoCentavos;
+  if (restante <= 0) {
+    return { permitido: false, explicacao: 'Este pedido já foi reembolsado por completo.' };
+  }
+  if (ctx.ingressosParaReembolsar <= 0 || ctx.ingressosParaReembolsar > ctx.ingressosNoPedido) {
+    return { permitido: false, explicacao: 'Quantidade inválida.' };
+  }
+
+  const partes = repartir(
+    ctx.totalCentavos,
+    Array.from({ length: ctx.ingressosNoPedido }, () => 1),
+  );
+  const precoDosEscolhidos = partes
+    .slice(0, ctx.ingressosParaReembolsar)
+    .reduce((a: number, b: number) => a + b, 0);
+  const teto = Math.min(precoDosEscolhidos, restante);
+
+  if (pedido.modalidade === 'abatimento') {
+    const valor = pedido.abatimentoCentavos;
+    if (valor === undefined || !Number.isInteger(valor) || valor <= 0) {
+      return { permitido: false, explicacao: 'Informe o valor do abatimento.' };
+    }
+    if (valor > teto) {
+      return {
+        permitido: false,
+        explicacao: 'O abatimento não pode passar do que foi pago pelos ingressos escolhidos.',
+      };
+    }
+    return {
+      permitido: true,
+      tipo: pedido.problema,
+      valorCentavos: valor,
+      incluiConveniencia: false,
+      explicacao: 'Abatimento por falha na prestação do serviço.',
+    };
+  }
+
+  return {
+    permitido: true,
+    tipo: pedido.problema,
+    valorCentavos: teto,
+    incluiConveniencia: true,
+    explicacao: 'Falha na prestação do serviço: devolução integral, taxa incluída.',
   };
 }

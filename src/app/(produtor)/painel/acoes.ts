@@ -8,6 +8,11 @@ import { z } from 'zod';
 import { serviceDb, withTenant } from '@/db/client';
 import { auditLog, events, ticketTypes, venues } from '@/db/schema';
 import { excedeCapacidade, excedeCotaMeia } from '@/domain/inventory';
+import {
+  JUSTIFICATIVA_MINIMA,
+  PROBLEMAS_NO_EVENTO,
+  type ProblemaNoEvento,
+} from '@/domain/refund-policy';
 import { AuthError, requireRole } from '@/lib/auth';
 import { invalidarCachePublico } from '@/lib/cache-publico';
 import { enfileirar } from '@/lib/jobs';
@@ -706,5 +711,86 @@ export async function reembolsarPedido(
   if (!r.ok) return { erro: r.erro };
 
   revalidatePath(`/painel/vendas/${orderId}`);
+  return { ok: true };
+}
+
+const ROTULO_PROBLEMA: Record<ProblemaNoEvento, string> = {
+  evento_nao_realizado: 'Evento não realizado',
+  servico_nao_prestado: 'Serviço não prestado ao comprador',
+  servico_diferente_do_ofertado: 'Evento diferente do anunciado',
+  reclamacao_procedente: 'Reclamação procedente',
+};
+
+/**
+ * Reembolso por falha na prestação do serviço — ADR-022.
+ *
+ * Não é a exceção "fora do prazo" do formulário comum: é o reconhecimento de
+ * que o serviço vendido não foi entregue como prometido. Por isso exige dono
+ * ou administrador, motivo tipificado e justificativa por escrito.
+ */
+export async function reembolsarPorProblema(
+  tenantId: string,
+  orderId: string,
+  _anterior: EstadoFormulario,
+  formData: FormData,
+): Promise<EstadoFormulario> {
+  const dados = z
+    .object({
+      quantidade: z.coerce.number().int().min(1, 'Escolha quantos ingressos.'),
+      problema: z.enum(PROBLEMAS_NO_EVENTO, 'Escolha o que aconteceu.'),
+      modalidade: z.enum(['integral', 'abatimento']),
+      abatimento: z.string().optional(),
+      justificativa: z
+        .string()
+        .trim()
+        .min(JUSTIFICATIVA_MINIMA, `Descreva o que aconteceu (pelo menos ${JUSTIFICATIVA_MINIMA} caracteres).`)
+        .max(1000),
+    })
+    .safeParse({
+      quantidade: formData.get('quantidade'),
+      problema: formData.get('problema'),
+      modalidade: formData.get('modalidade') ?? 'integral',
+      abatimento: formData.get('abatimento') ?? undefined,
+      justificativa: formData.get('justificativa') ?? '',
+    });
+
+  if (!dados.success) return { erro: dados.error.issues[0]?.message ?? 'Confira os dados.' };
+
+  let abatimentoCentavos: number | undefined;
+  if (dados.data.modalidade === 'abatimento') {
+    try {
+      abatimentoCentavos = reaisParaCentavos(dados.data.abatimento ?? '');
+    } catch {
+      return { erro: 'Valor do abatimento inválido.' };
+    }
+  }
+
+  const auth = await getAuth();
+  try {
+    requireRole(auth, tenantId, 'admin');
+  } catch {
+    return { erro: 'Reembolso por problema no evento exige dono ou administrador.' };
+  }
+
+  const { executarReembolso } = await import('@/lib/refunds');
+
+  const r = await executarReembolso({
+    tenantId,
+    orderId,
+    quantidade: dados.data.quantidade,
+    motivo: dados.data.problema === 'evento_nao_realizado' ? 'event_canceled' : 'other',
+    solicitadoPor: auth?.userId ?? null,
+    problema: {
+      problema: dados.data.problema,
+      modalidade: dados.data.modalidade,
+      ...(abatimentoCentavos !== undefined ? { abatimentoCentavos } : {}),
+      justificativa: `${ROTULO_PROBLEMA[dados.data.problema]}: ${dados.data.justificativa}`,
+    },
+  });
+
+  if (!r.ok) return { erro: r.erro };
+
+  revalidatePath(`/painel/vendas/${orderId}`);
+  revalidatePath('/painel/financeiro');
   return { ok: true };
 }

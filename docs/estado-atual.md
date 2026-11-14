@@ -1,6 +1,6 @@
 # Estado atual do projeto
 
-**Última verificação: 13/11/2026** — operador (ADR-020) e motor de repasse (ADR-021). Documento de passagem de bastão: quem
+**Última verificação: 14/11/2026** — operador (ADR-020), motor de repasse e tela financeira (ADR-021), devolução por falha na prestação do serviço (ADR-022). Documento de passagem de bastão: quem
 chegar agora — pessoa ou sessão nova do Claude — lê este arquivo e sabe onde
 o projeto está, sem precisar inspecionar o repositório de novo.
 
@@ -116,8 +116,9 @@ banco, rede nem SDK. Toda transição de estado passa por lá.
 
 ## 4. Banco de dados
 
-**25 tabelas, 11 migrations** (`0000` a `0010`). A `0010` (coluna
-`payouts.tentativas`) ainda precisa ser aplicada no banco do Supabase.
+**25 tabelas, 12 migrations** (`0000` a `0011`). A `0010` (coluna
+`payouts.tentativas`) e a `0011` (motivos novos de reembolso) precisam estar
+aplicadas no Supabase antes de publicar este código.
 
 ### Comparação com a seção 7 do plano
 
@@ -240,16 +241,17 @@ controles de cenário** da seção 9.1, sem faltar nenhum: `simulatePayment`,
 
 ## 8. Testes
 
-**454 testes em 29 arquivos, todos passando** (13/11/2026, contra um Postgres
+**478 testes em 30 arquivos, todos passando** (14/11/2026, contra um Postgres
 16 local com as migrations e a RLS aplicadas). Build de produção, lint e tipos
 limpos.
 
 - **16 arquivos unitários** — domínio puro: dinheiro, taxas, máquina de
   estado, portaria, fila, cupom, transferência, CPF, política de reembolso,
   repasse.
-- **13 arquivos de integração**, contra o banco real: RLS, estoque, webhook,
+- **14 arquivos de integração**, contra o banco real: RLS, estoque, webhook,
   portaria, listas, fila, cupons, bilheteria, relatórios, equipe, rate limit,
-  domínio, repasse.
+  domínio, repasse (com a tela financeira e o aviso), devolução por problema
+  no evento.
 
 ### Os testes que sustentam o sistema
 
@@ -368,9 +370,16 @@ ainda é manual (adicionar o domínio ao projeto na Vercel).
 
 ### ~~2º — Prompt 15: motor de repasse~~ — ENTREGUE em 13/11/2026
 
-Ver ADR-021. **Pendências:** tela `/painel/financeiro` para o produtor ver as
-tranches, aviso por e-mail quando o repasse sai, feriados no cálculo de dias
-úteis e rateio entre sócios (`event_splits`).
+Ver ADR-021. Tela `/painel/financeiro`, aviso por e-mail e feriados bancários
+entregues em 14/11/2026. **Pendente:** rateio entre sócios (`event_splits`),
+que depende de cada sócio ter cadastro de recebedor na PSP.
+
+### Devolução por falha na prestação do serviço — ENTREGUE em 14/11/2026
+
+Evento não realizado, comprador sem o serviço, evento diferente do anunciado
+e reclamação procedente: devolução integral ou abatimento, sem prazo, com
+relato por escrito. Ver ADR-022 — **a base legal ainda precisa ser conferida
+em fonte oficial.**
 
 ### 3º — Exportação CSV e público recorrente
 

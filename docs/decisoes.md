@@ -1087,13 +1087,25 @@ O `FakeProvider` também passou a contestar no chargeback só o que ainda não
 tinha sido reembolsado — antes ele debitava o valor cheio da transação mesmo
 depois de reembolso parcial.
 
+**Complementos entregues em 14/11/2026:**
+
+- **Tela do produtor** `/painel/financeiro` (só dono e administrador): já
+  liberado, a liberar, saldo a descoberto e, por evento, cada tranche com data,
+  valor e situação. Antes da execução o valor aparece como estimativa, calculado
+  pela mesma função do motor (`somarPedidos`). Leitura por `withTenant`, sob RLS.
+- **Aviso ao produtor** por e-mail quando uma tranche libera dinheiro ou fica a
+  descoberto. Entra na fila (`avisar-repasse`) na mesma hora em que o repasse
+  se encerra e sai na mesma passagem do job `repasses`.
+- **Dias sem expediente bancário** no cálculo dos dias úteis
+  (`feriadosBancarios`): 1/1, 21/4, 1/5, 7/9, 12/10, 2/11, 15/11, 20/11, 25/12,
+  segunda e terça de carnaval, sexta-feira santa e Corpus Christi (os móveis
+  calculados a partir da Páscoa). Feriados estaduais e municipais não entram.
+  **Base legal NÃO VERIFICADA EM FONTE OFICIAL NESTA CONSULTA** — o acesso ao
+  Planalto foi recusado pelo ambiente. Conferir a lista contra o calendário da
+  PSP escolhida e contra a legislação (em especial a inclusão de 20/11).
+
 **Fora deste ADR, ainda não feito:**
 
-- **Tela do produtor** (`/painel/financeiro`) mostrando as tranches, datas e
-  valores. O dado existe; falta a tela.
-- **Aviso ao produtor** por e-mail quando um repasse sai.
-- **Feriados** no cálculo de dias úteis. Hoje só sábado e domingo; o efeito é
-  agendar a principal um dia antes do que a PSP liberaria num feriado.
 - **Rateio entre sócios** (`event_splits`): a tabela existe, mas nem o
   checkout nem o repasse a usam ainda.
 - **Reembolso sem conveniência.** Quando a política devolve só o preço do
@@ -1101,3 +1113,70 @@ depois de reembolso parcial.
   operador devolve uma fatia da conveniência que deveria manter. Achado
   durante este trabalho, anterior a ele; depende de a PSP aceitar estorno com
   valor por recebedor.
+
+---
+
+## ADR-022 — Devolução por falha na prestação do serviço
+
+**Data:** 2026-11-14
+**Status:** aceita
+
+**Contexto.** O reembolso existente cobria três situações: arrependimento
+dentro do prazo, evento cancelado pelo sistema e exceção manual "fora do
+prazo". Faltava a mais delicada: **o serviço vendido não foi entregue como
+prometido** — o evento não aconteceu e ninguém cancelou pelo sistema, o
+comprador foi barrado, a atração anunciada não veio, ou houve reclamação que o
+produtor reconheceu. Tratar isso como "exceção fora do prazo" escondia o
+motivo e não deixava devolver só parte do valor.
+
+**Decisão.**
+
+1. **Quatro motivos tipificados**, gravados em `refunds.tipo` (migration
+   `0011`, valores novos no enum `refund_type`):
+   `evento_nao_realizado`, `servico_nao_prestado`,
+   `servico_diferente_do_ofertado`, `reclamacao_procedente`.
+2. **Duas modalidades:**
+   - **Devolução integral** dos ingressos escolhidos, **taxa de conveniência
+     incluída**. Os ingressos que ainda valem são cancelados; o que já foi
+     usado na porta continua registrado como usado.
+   - **Abatimento**: devolve um valor informado, até o que foi pago pelos
+     ingressos escolhidos, e **o ingresso continua valendo** — para o evento
+     que aconteceu pior do que o anunciado.
+3. **Sem prazo e sem depender da política do evento.** Vale depois do evento
+   e mesmo em evento que não permite reembolso parcial.
+4. **Só dono ou administrador**, com **relato por escrito** (mínimo de 15
+   caracteres), que vai para `refunds.observacao` e para o `audit_log`, junto
+   com o motivo e a modalidade. É esse registro que responde a uma reclamação
+   no Procon ou a uma contestação no cartão.
+5. Na PSP, o estorno usa os motivos que o contrato `PaymentProvider` já tem
+   (`event_canceled` para evento não realizado, `other` para os demais) — o
+   contrato não mudou.
+6. O estorno entra no repasse como qualquer outro reembolso: antes da
+   liberação, reduz a tranche; depois dela, sai da reserva ou vira saldo a
+   descoberto (ADR-021).
+
+**Onde fica.** Regra pura em `reembolsoPorProblema`
+(`src/domain/refund-policy.ts`); execução em `executarReembolso`
+(`src/lib/refunds.ts`); tela na página do pedido, bloco "Problema no evento".
+
+**Base legal — NÃO VERIFICADA EM FONTE OFICIAL NESTA CONSULTA.** A tela fala
+apenas em "Código de Defesa do Consumidor", sem citar artigo, porque o texto
+da Lei 8.078/1990 não pôde ser aberto no Planalto durante este trabalho (o
+endereço redirecionou para a página inicial do gov.br, e o acesso direto foi
+recusado pelo ambiente). Antes de citar dispositivos na tela, nos termos de
+uso ou em resposta a cliente, conferir no texto compilado oficial, ao menos:
+responsabilidade do fornecedor de serviço por defeito e por vício (inclusive
+as opções do consumidor entre reexecução, restituição e abatimento),
+solidariedade da cadeia de fornecedores, descumprimento da oferta, prazos de
+reclamação por vício e cláusulas abusivas. Conferir também se a devolução
+integral da taxa de conveniência nesses casos é a posição correta frente à
+jurisprudência — o comentário de `refund-policy.ts` atribui ao Procon-SP um
+entendimento sobre a taxa que **também não foi verificado** em fonte oficial.
+
+**Não feito ainda:**
+- **Pedido de devolução pelo próprio comprador** (autoatendimento): hoje o
+  comprador reclama por fora e o produtor registra aqui.
+- **Quem arca com a taxa de conveniência devolvida.** A PSP debita os dois
+  recebedores na proporção do split; o operador devolve a parte dele. Cobrar
+  do produtor a taxa devolvida por falha dele é decisão comercial, para o
+  contrato plataforma–produtor.

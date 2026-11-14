@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   avaliarReembolso,
   prazoDeArrependimento,
+  JUSTIFICATIVA_MINIMA,
   reembolsoManual,
+  reembolsoPorProblema,
   type ContextoReembolso,
 } from '@/domain/refund-policy';
 
@@ -203,6 +205,108 @@ describe('reembolso manual', () => {
       jaReembolsadoCentavos: 22_000,
       ingressosNoPedido: 2,
       ingressosParaReembolsar: 1,
+    });
+    expect(d.permitido).toBe(false);
+  });
+});
+
+describe('reembolso por problema no evento (ADR-022)', () => {
+  const base = {
+    totalCentavos: 33_000, // 3 ingressos de R$ 110,00
+    jaReembolsadoCentavos: 0,
+    ingressosNoPedido: 3,
+    ingressosParaReembolsar: 3,
+  };
+  const relato = 'Atração principal não compareceu ao evento.';
+
+  it('integral devolve tudo, taxa incluída, sem olhar prazo', () => {
+    const d = reembolsoPorProblema(base, {
+      problema: 'evento_nao_realizado',
+      modalidade: 'integral',
+      justificativa: relato,
+    });
+    expect(d).toMatchObject({
+      permitido: true,
+      tipo: 'evento_nao_realizado',
+      valorCentavos: 33_000,
+      incluiConveniencia: true,
+    });
+  });
+
+  it('devolve parte dos ingressos mesmo em evento que não permite reembolso parcial', () => {
+    const d = reembolsoPorProblema(
+      { ...base, ingressosParaReembolsar: 1 },
+      { problema: 'servico_nao_prestado', modalidade: 'integral', justificativa: relato },
+    );
+    expect(d).toMatchObject({ permitido: true, valorCentavos: 11_000 });
+  });
+
+  it('abatimento devolve o valor informado, sem a taxa', () => {
+    const d = reembolsoPorProblema(base, {
+      problema: 'servico_diferente_do_ofertado',
+      modalidade: 'abatimento',
+      abatimentoCentavos: 5_000,
+      justificativa: relato,
+    });
+    expect(d).toMatchObject({ permitido: true, valorCentavos: 5_000, incluiConveniencia: false });
+  });
+
+  it('abatimento não passa do que foi pago pelos ingressos escolhidos', () => {
+    const d = reembolsoPorProblema(
+      { ...base, ingressosParaReembolsar: 1 },
+      {
+        problema: 'reclamacao_procedente',
+        modalidade: 'abatimento',
+        abatimentoCentavos: 11_001,
+        justificativa: relato,
+      },
+    );
+    expect(d.permitido).toBe(false);
+  });
+
+  it('abatimento exige valor', () => {
+    for (const abatimentoCentavos of [undefined, 0, -1, 10.5]) {
+      const d = reembolsoPorProblema(base, {
+        problema: 'reclamacao_procedente',
+        modalidade: 'abatimento',
+        ...(abatimentoCentavos !== undefined ? { abatimentoCentavos } : {}),
+        justificativa: relato,
+      });
+      expect(d.permitido).toBe(false);
+    }
+  });
+
+  it('exige relato', () => {
+    const d = reembolsoPorProblema(base, {
+      problema: 'evento_nao_realizado',
+      modalidade: 'integral',
+      justificativa: '   curto   ',
+    });
+    expect(d).toMatchObject({ permitido: false });
+    expect(JUSTIFICATIVA_MINIMA).toBeGreaterThan('curto'.length);
+  });
+
+  it('não devolve além do que resta no pedido', () => {
+    const d = reembolsoPorProblema(
+      { ...base, jaReembolsadoCentavos: 30_000 },
+      { problema: 'evento_nao_realizado', modalidade: 'integral', justificativa: relato },
+    );
+    expect(d).toMatchObject({ permitido: true, valorCentavos: 3_000 });
+  });
+
+  it('pedido já devolvido por inteiro é recusado', () => {
+    const d = reembolsoPorProblema(
+      { ...base, jaReembolsadoCentavos: 33_000 },
+      { problema: 'evento_nao_realizado', modalidade: 'integral', justificativa: relato },
+    );
+    expect(d.permitido).toBe(false);
+  });
+
+  it('recusa motivo fora da lista', () => {
+    const d = reembolsoPorProblema(base, {
+      problema: 'qualquer_coisa' as never,
+      modalidade: 'integral',
+      justificativa: relato,
     });
     expect(d.permitido).toBe(false);
   });

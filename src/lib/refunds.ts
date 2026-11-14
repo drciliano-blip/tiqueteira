@@ -24,7 +24,9 @@ import { auditLog, events, orders, refunds, tickets } from '@/db/schema';
 import {
   avaliarReembolso,
   reembolsoManual,
+  reembolsoPorProblema,
   type Decisao,
+  type PedidoPorProblema,
   type TipoReembolso,
 } from '@/domain/refund-policy';
 import { getPaymentProvider } from '@/lib/payments/provider';
@@ -39,6 +41,11 @@ export type PedidoDeReembolso = {
   manual?: boolean;
   solicitadoPor?: string | null;
   observacao?: string | undefined;
+  /**
+   * Falha na prestação do serviço (ADR-022). Ignora prazos e a política do
+   * evento; exige justificativa. Só dono ou administrador.
+   */
+  problema?: PedidoPorProblema;
 };
 
 export type ResultadoReembolso =
@@ -109,9 +116,18 @@ export async function executarReembolso(
     jaReembolsadoCentavos: jaReembolsado,
   };
 
-  const decisao: Decisao = pedido.manual
-    ? reembolsoManual(contexto)
-    : avaliarReembolso(contexto);
+  const decisao: Decisao = pedido.problema
+    ? reembolsoPorProblema(contexto, pedido.problema)
+    : pedido.manual
+      ? reembolsoManual(contexto)
+      : avaliarReembolso(contexto);
+
+  /**
+   * Abatimento mantém o ingresso: o serviço foi prestado, só que pior do que
+   * o anunciado. Em todos os outros casos, o ingresso devolvido deixa de
+   * valer na porta.
+   */
+  const cancelaIngressos = pedido.problema?.modalidade !== 'abatimento';
 
   if (!decisao.permitido) return { ok: false, erro: decisao.explicacao };
 
@@ -132,7 +148,7 @@ export async function executarReembolso(
       motivo: pedido.motivo,
       tipo: decisao.tipo,
       incluiConveniencia: decisao.incluiConveniencia,
-      observacao: pedido.observacao ?? decisao.explicacao,
+      observacao: pedido.problema?.justificativa ?? pedido.observacao ?? decisao.explicacao,
       valorCentavos: decisao.valorCentavos,
       status: 'processing',
       idempotencyKey,
@@ -185,14 +201,16 @@ export async function executarReembolso(
       .set({
         status: 'succeeded',
         concluidoEm: new Date(),
-        observacao: `${decisao.explicacao} Devolução fora da plataforma (venda de bilheteria).`,
+        observacao: `${pedido.problema?.justificativa ?? decisao.explicacao} Devolução fora da plataforma (venda de bilheteria).`,
       })
       .where(eq(refunds.id, registro.id));
   }
 
   // Cancela os ingressos devolvidos e atualiza o pedido, numa transação.
   await db.transaction(async (tx) => {
-    const paraCancelar = validos.slice(0, pedido.quantidade).map((t) => t.id);
+    const paraCancelar = cancelaIngressos
+      ? validos.slice(0, pedido.quantidade).map((t) => t.id)
+      : [];
 
     if (paraCancelar.length > 0) {
       await tx
@@ -231,6 +249,13 @@ export async function executarReembolso(
         motivo: pedido.motivo,
         manual: Boolean(pedido.manual),
         ingressos: paraCancelar.length,
+        ...(pedido.problema
+          ? {
+              problema: pedido.problema.problema,
+              modalidade: pedido.problema.modalidade,
+              justificativa: pedido.problema.justificativa,
+            }
+          : {}),
       },
     });
   });

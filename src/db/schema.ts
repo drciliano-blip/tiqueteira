@@ -169,6 +169,11 @@ export const refundTypeEnum = pgEnum('refund_type', [
   'evento_cancelado',
   'chargeback',
   'outro',
+  // Falha na prestação do serviço — ADR-022.
+  'evento_nao_realizado',
+  'servico_nao_prestado',
+  'servico_diferente_do_ofertado',
+  'reclamacao_procedente',
 ]);
 
 /**
