@@ -171,6 +171,23 @@ export class FakeProvider implements PaymentProvider, FakeProviderControls {
     return novo;
   }
 
+  /**
+   * Registra um recebedor que já existe fora desta instância — o do operador,
+   * que vem de `PAYMENT_OPERATOR_RECIPIENT_ID`. Sem isto, o provider falso só
+   * reconhecia identificadores com o prefixo `fake_rcpt_`, e um valor de
+   * ambiente com outro formato fazia o checkout recusar TODA compra com
+   * "o sistema de pagamento não respondeu".
+   */
+  registrarRecebedor(providerRecipientId: string): void {
+    if (this.recebedores.has(providerRecipientId)) return;
+    this.recebedores.set(providerRecipientId, {
+      providerRecipientId,
+      status: 'active',
+      raw: { registradoPorAmbiente: true },
+    });
+    this.saldo(providerRecipientId);
+  }
+
   /** Atalho de teste: cria um recebedor já aprovado. */
   criarRecebedorAtivo(rotulo = 'ativo'): string {
     const id = this.id(`rcpt_${rotulo}`);
